@@ -1,6 +1,6 @@
 # Very Deep VAEs
 
-Repository for the paper "Very Deep VAEs Generalize Autoregressive Models and Can Outperform Them on Images," submitted to ICLR 2021 (https://openreview.net/forum?id=RLRXCV6DbEJ)
+Repository for the paper ["Very Deep VAEs Generalize Autoregressive Models and Can Outperform Them on Images"](https://arxiv.org/abs/2011.10650).
 
 Some model samples and a visualization of how it generates them:
 ![image](header-image.png)
