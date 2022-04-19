@@ -1,0 +1,20 @@
+version: "3.3"
+services:
+    vdvae_cuda101:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        deploy:
+            resources:
+                reservations:
+                    devices:
+                        - capabilities:
+                            - gpu
+        environment:
+            - NVIDIA_VISIBLE_DEVICES=all
+            - NVIDIA_DRIVER_CAPABILITIES=all
+        volumes:
+            - $PWD:/root/work
+        working_dir: /root/work/
+        restart: always
+        tty: true

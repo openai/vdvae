@@ -19,6 +19,21 @@ pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cud
 cd ..
 ```
 
+## Using Docker
+You can construct a container environment using Docker.
+
+All you have to do is to implement a following shell file.
+
+```
+./start_container.sh
+```
+
+You can login the container if you implement a following shell file.
+
+```
+./login_container.sh
+```
+
 Also, you'll have to download the data, depending on which one you want to run:
 ```
 ./setup_cifar10.sh
