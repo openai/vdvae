@@ -151,9 +151,9 @@ def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
     zs = [
         s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed)
     ]
-    if viz_batch_original.dtype is not torch.uint8:
+    if torch.max(viz_batch_original) <= 1.:
         viz_batch_original *= 255
-        viz_batch_original = torch.floor(viz_batch_original).to(torch.uint8)
+    viz_batch_original = torch.floor(viz_batch_original).to(torch.uint8)
     batches = [viz_batch_original.numpy()]
     mb = viz_batch_processed.shape[0]
     lv_points = np.floor(
