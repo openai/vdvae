@@ -2,6 +2,7 @@ HPARAMS_REGISTRY = {}
 
 
 class Hyperparams(dict):
+
     def __getattr__(self, attr):
         try:
             return self[attr]
@@ -24,7 +25,6 @@ cifar10.dataset = 'cifar10'
 cifar10.n_batch = 16
 cifar10.ema_rate = 0.9999
 HPARAMS_REGISTRY['cifar10'] = cifar10
-
 
 i32 = Hyperparams()
 i32.update(cifar10)
@@ -68,7 +68,6 @@ ffhq_256.grad_clip = 130.
 ffhq_256.skip_threshold = 180.
 HPARAMS_REGISTRY['ffhq256'] = ffhq_256
 
-
 ffhq1024 = Hyperparams()
 ffhq1024.update(ffhq_256)
 ffhq1024.dataset = 'ffhq_1024'
@@ -89,9 +88,21 @@ ffhq1024.enc_blocks = "1024x1,1024d2,512x3,512d2,256x5,256d2,128x7,128d2,64x10,6
 ffhq1024.custom_width_str = "512:32,256:64,128:512,64:512,32:512,16:512,8:512,4:512,1:512"
 HPARAMS_REGISTRY['ffhq1024'] = ffhq1024
 
+bev64 = Hyperparams()
+bev64.update(i32)
+bev64.n_batch = 4
+bev64.grad_clip = 220.0
+bev64.skip_threshold = 380.0
+bev64.dataset = 'bev'
+bev64.data_root = './bevs_64px'
+bev64.dec_blocks = "1x2,4m1,4x3,8m4,8x7,16m8,16x15,32m16,32x31,64m32,64x12"
+bev64.enc_blocks = "64x11,64d2,32x20,32d2,16x9,16d2,8x8,8d2,4x7,4d4,1x5"
+HPARAMS_REGISTRY['bev64'] = bev64
+
 
 def parse_args_and_update_hparams(H, parser, s=None):
     args = parser.parse_args(s)
+    # args.hparam_sets = 'bev64'
     valid_args = set(args.__dict__.keys())
     hparam_sets = [x for x in args.hparam_sets.split(',') if x]
     for hp_set in hparam_sets:

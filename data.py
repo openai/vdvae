@@ -1,11 +1,15 @@
-import numpy as np
-import pickle
+import glob
+import gzip
 import os
+import pickle
+import random
+
+import numpy as np
 import torch
-from torch.utils.data import TensorDataset
-from torchvision.datasets import ImageFolder
 import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
+from torch.utils.data import TensorDataset
+from torchvision.datasets import ImageFolder
 
 
 def set_up_data(H):
@@ -43,6 +47,12 @@ def set_up_data(H):
         H.image_channels = 3
         shift = -120.63838
         scale = 1. / 64.16736
+    elif H.dataset == 'bev':
+        trX, vaX, teX = bev(H.data_root)
+        H.image_size = 64
+        H.image_channels = 1
+        shift = -0.5  # Range (0, 1) --> (-1, +1)
+        scale = 2.
     else:
         raise ValueError('unknown dataset: ', H.dataset)
 
@@ -108,28 +118,33 @@ def unpickle_cifar10(file):
 
 
 def imagenet32(data_root):
-    trX = np.load(os.path.join(data_root, 'imagenet32-train.npy'), mmap_mode='r')
+    trX = np.load(os.path.join(data_root, 'imagenet32-train.npy'),
+                  mmap_mode='r')
     np.random.seed(42)
     tr_va_split_indices = np.random.permutation(trX.shape[0])
     train = trX[tr_va_split_indices[:-5000]]
     valid = trX[tr_va_split_indices[-5000:]]
-    test = np.load(os.path.join(data_root, 'imagenet32-valid.npy'), mmap_mode='r')
+    test = np.load(os.path.join(data_root, 'imagenet32-valid.npy'),
+                   mmap_mode='r')
     return train, valid, test
 
 
 def imagenet64(data_root):
-    trX = np.load(os.path.join(data_root, 'imagenet64-train.npy'), mmap_mode='r')
+    trX = np.load(os.path.join(data_root, 'imagenet64-train.npy'),
+                  mmap_mode='r')
     np.random.seed(42)
     tr_va_split_indices = np.random.permutation(trX.shape[0])
     train = trX[tr_va_split_indices[:-5000]]
     valid = trX[tr_va_split_indices[-5000:]]
-    test = np.load(os.path.join(data_root, 'imagenet64-valid.npy'), mmap_mode='r')  # this is test.
+    test = np.load(os.path.join(data_root, 'imagenet64-valid.npy'),
+                   mmap_mode='r')  # this is test.
     return train, valid, test
 
 
 def ffhq1024(data_root):
     # we did not significantly tune hyperparameters on ffhq-1024, and so simply evaluate on the test set
-    return os.path.join(data_root, 'ffhq1024/train'), os.path.join(data_root, 'ffhq1024/valid'), os.path.join(data_root, 'ffhq1024/valid')
+    return os.path.join(data_root, 'ffhq1024/train'), os.path.join(
+        data_root, 'ffhq1024/valid'), os.path.join(data_root, 'ffhq1024/valid')
 
 
 def ffhq256(data_root):
@@ -143,15 +158,23 @@ def ffhq256(data_root):
 
 
 def cifar10(data_root, one_hot=True):
-    tr_data = [unpickle_cifar10(os.path.join(data_root, 'cifar-10-batches-py/', 'data_batch_%d' % i)) for i in range(1, 6)]
+    tr_data = [
+        unpickle_cifar10(
+            os.path.join(data_root, 'cifar-10-batches-py/',
+                         'data_batch_%d' % i)) for i in range(1, 6)
+    ]
     trX = np.vstack(data['data'] for data in tr_data)
     trY = np.asarray(flatten([data['labels'] for data in tr_data]))
-    te_data = unpickle_cifar10(os.path.join(data_root, 'cifar-10-batches-py/', 'test_batch'))
+    te_data = unpickle_cifar10(
+        os.path.join(data_root, 'cifar-10-batches-py/', 'test_batch'))
     teX = np.asarray(te_data['data'])
     teY = np.asarray(te_data['labels'])
     trX = trX.reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
     teX = teX.reshape(-1, 3, 32, 32).transpose(0, 2, 3, 1)
-    trX, vaX, trY, vaY = train_test_split(trX, trY, test_size=5000, random_state=11172018)
+    trX, vaX, trY, vaY = train_test_split(trX,
+                                          trY,
+                                          test_size=5000,
+                                          random_state=11172018)
     if one_hot:
         trY = np.eye(10, dtype=np.float32)[trY]
         vaY = np.eye(10, dtype=np.float32)[vaY]
@@ -160,4 +183,40 @@ def cifar10(data_root, one_hot=True):
         trY = np.reshape(trY, [-1, 1])
         vaY = np.reshape(vaY, [-1, 1])
         teY = np.reshape(teY, [-1, 1])
-    return (trX, trY), (vaX, vaY), (teX, teY)
+    return (trX, trY), (vaX, vaY), (teX, teY)  # (N, H, W, C), (N, 1)
+
+
+def read_compressed_pickle(path):
+    try:
+        with gzip.open(path, "rb") as f:
+            pkl_obj = f.read()
+            obj = pickle.loads(pkl_obj)
+            return obj
+    except IOError as error:
+        print(error)
+
+
+def bev(data_root):
+    '''
+    NOTE: Input data range is transformed (0. 1) --> (-1, +1) during
+          preprocessing.
+    '''
+    sample_paths = glob.glob(os.path.join(data_root, '*', '*.pkl.gz'))
+    random.shuffle(sample_paths)
+
+    samples = []
+
+    for sample_path in sample_paths:
+        sample = read_compressed_pickle(sample_path)
+        road_present = sample['road_present']  # (H, W)
+        samples.append(road_present)
+
+    samples = np.stack(samples)  # (N, H, W)
+    samples = np.expand_dims(samples, -1)  # (N, H, W, 1)
+
+    trX = samples[100:]
+    vaX = samples[-100:]
+    teX = samples[-100:]
+
+    # (N, H, W, C)
+    return trX, vaX, teX
