@@ -151,9 +151,6 @@ def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
     zs = [
         s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed)
     ]
-    if torch.max(viz_batch_original) <= 1.:
-        viz_batch_original *= 255
-    viz_batch_original = torch.floor(viz_batch_original).to(torch.uint8)
     batches = [viz_batch_original.numpy()]
     mb = viz_batch_processed.shape[0]
     lv_points = np.floor(
@@ -164,11 +161,12 @@ def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
     for t in [1.0, 0.9, 0.8, 0.7][:H.num_temperatures_visualize]:
         batches.append(ema_vae.forward_uncond_samples(mb, t=t))
     n_rows = len(batches)
+    ch = batches[0].shape[-1]
     im = np.concatenate(batches, axis=0).reshape(
         (n_rows, mb,
          *viz_batch_processed.shape[1:])).transpose([0, 2, 1, 3, 4]).reshape([
              n_rows * viz_batch_processed.shape[1],
-             mb * viz_batch_processed.shape[2], 3
+             mb * viz_batch_processed.shape[2], ch
          ])
     logprint(f'printing samples to {fname}')
     imageio.imwrite(fname, im)

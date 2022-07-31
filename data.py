@@ -51,8 +51,8 @@ def set_up_data(H):
         trX, vaX, teX = bev(H.data_root)
         H.image_size = 64
         H.image_channels = 1
-        shift = -0.5  # Range (0, 1) --> (-1, +1)
-        scale = 2.
+        shift = -127.5  # Range (0, 255) --> (-1, +1)
+        scale = 1. / 127.5
     else:
         raise ValueError('unknown dataset: ', H.dataset)
 
@@ -198,8 +198,12 @@ def read_compressed_pickle(path):
 
 def bev(data_root):
     '''
-    NOTE: Input data range is transformed (0. 1) --> (-1, +1) during
+    NOTE: Input data range is transformed (0, 255) --> (-1., +1.) during
           preprocessing.
+
+    Returns:
+        trX: Training data matrix (N, H, W, C) of images (uint8) with value
+             range (0, 255).
     '''
     sample_paths = glob.glob(os.path.join(data_root, '*', '*.pkl.gz'))
     random.shuffle(sample_paths)
@@ -209,6 +213,10 @@ def bev(data_root):
     for sample_path in sample_paths:
         sample = read_compressed_pickle(sample_path)
         road_present = sample['road_present']  # (H, W)
+        # Convert (0., 1.) prob values --> (0, 255) image values
+        road_present = np.round(road_present * 255).astype(np.uint8)
+
+        # road_present = np.stack([road_present, road_present, road_present], -1)
         samples.append(road_present)
 
     samples = np.stack(samples)  # (N, H, W)

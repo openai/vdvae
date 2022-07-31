@@ -1,20 +1,33 @@
+import itertools
+from collections import defaultdict
+
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
-from vae_helpers import HModule, get_1x1, get_3x3, DmolNet, draw_gaussian_diag_samples, gaussian_analytical_kl
-from collections import defaultdict
-import numpy as np
-import itertools
+
+from vae_helpers import (DmolNet, HModule, draw_gaussian_diag_samples,
+                         gaussian_analytical_kl, get_1x1, get_3x3)
 
 
 class Block(nn.Module):
-    def __init__(self, in_width, middle_width, out_width, down_rate=None, residual=False, use_3x3=True, zero_last=False):
+
+    def __init__(self,
+                 in_width,
+                 middle_width,
+                 out_width,
+                 down_rate=None,
+                 residual=False,
+                 use_3x3=True,
+                 zero_last=False):
         super().__init__()
         self.down_rate = down_rate
         self.residual = residual
         self.c1 = get_1x1(in_width, middle_width)
-        self.c2 = get_3x3(middle_width, middle_width) if use_3x3 else get_1x1(middle_width, middle_width)
-        self.c3 = get_3x3(middle_width, middle_width) if use_3x3 else get_1x1(middle_width, middle_width)
+        self.c2 = get_3x3(middle_width, middle_width) if use_3x3 else get_1x1(
+            middle_width, middle_width)
+        self.c3 = get_3x3(middle_width, middle_width) if use_3x3 else get_1x1(
+            middle_width, middle_width)
         self.c4 = get_1x1(middle_width, out_width, zero_weights=zero_last)
 
     def forward(self, x):
@@ -24,7 +37,9 @@ class Block(nn.Module):
         xhat = self.c4(F.gelu(xhat))
         out = x + xhat if self.residual else xhat
         if self.down_rate is not None:
-            out = F.avg_pool2d(out, kernel_size=self.down_rate, stride=self.down_rate)
+            out = F.avg_pool2d(out,
+                               kernel_size=self.down_rate,
+                               stride=self.down_rate)
         return out
 
 
@@ -65,6 +80,7 @@ def get_width_settings(width, s):
 
 
 class Encoder(HModule):
+
     def build(self):
         H = self.H
         self.in_conv = get_3x3(H.image_channels, H.width)
@@ -73,7 +89,13 @@ class Encoder(HModule):
         blockstr = parse_layer_string(H.enc_blocks)
         for res, down_rate in blockstr:
             use_3x3 = res > 2  # Don't use 3x3s for 1x1, 2x2 patches
-            enc_blocks.append(Block(self.widths[res], int(self.widths[res] * H.bottleneck_multiple), self.widths[res], down_rate=down_rate, residual=True, use_3x3=use_3x3))
+            enc_blocks.append(
+                Block(self.widths[res],
+                      int(self.widths[res] * H.bottleneck_multiple),
+                      self.widths[res],
+                      down_rate=down_rate,
+                      residual=True,
+                      use_3x3=use_3x3))
         n_blocks = len(blockstr)
         for b in enc_blocks:
             b.c4.weight.data *= np.sqrt(1 / n_blocks)
@@ -87,12 +109,14 @@ class Encoder(HModule):
         for block in self.enc_blocks:
             x = block(x)
             res = x.shape[2]
-            x = x if x.shape[1] == self.widths[res] else pad_channels(x, self.widths[res])
+            x = x if x.shape[1] == self.widths[res] else pad_channels(
+                x, self.widths[res])
             activations[res] = x
         return activations
 
 
 class DecBlock(nn.Module):
+
     def __init__(self, H, res, mixin, n_blocks):
         super().__init__()
         self.base = res
@@ -103,18 +127,33 @@ class DecBlock(nn.Module):
         use_3x3 = res > 2
         cond_width = int(width * H.bottleneck_multiple)
         self.zdim = H.zdim
-        self.enc = Block(width * 2, cond_width, H.zdim * 2, residual=False, use_3x3=use_3x3)
-        self.prior = Block(width, cond_width, H.zdim * 2 + width, residual=False, use_3x3=use_3x3, zero_last=True)
+        self.enc = Block(width * 2,
+                         cond_width,
+                         H.zdim * 2,
+                         residual=False,
+                         use_3x3=use_3x3)
+        self.prior = Block(width,
+                           cond_width,
+                           H.zdim * 2 + width,
+                           residual=False,
+                           use_3x3=use_3x3,
+                           zero_last=True)
         self.z_proj = get_1x1(H.zdim, width)
         self.z_proj.weight.data *= np.sqrt(1 / n_blocks)
-        self.resnet = Block(width, cond_width, width, residual=True, use_3x3=use_3x3)
+        self.resnet = Block(width,
+                            cond_width,
+                            width,
+                            residual=True,
+                            use_3x3=use_3x3)
         self.resnet.c4.weight.data *= np.sqrt(1 / n_blocks)
         self.z_fn = lambda x: self.z_proj(x)
 
     def sample(self, x, acts):
         qm, qv = self.enc(torch.cat([x, acts], dim=1)).chunk(2, dim=1)
         feats = self.prior(x)
-        pm, pv, xpp = feats[:, :self.zdim, ...], feats[:, self.zdim:self.zdim * 2, ...], feats[:, self.zdim * 2:, ...]
+        pm, pv, xpp = feats[:, :self.zdim,
+                            ...], feats[:, self.zdim:self.zdim * 2,
+                                        ...], feats[:, self.zdim * 2:, ...]
         x = x + xpp
         z = draw_gaussian_diag_samples(qm, qv)
         kl = gaussian_analytical_kl(qm, pm, qv, pv)
@@ -123,7 +162,9 @@ class DecBlock(nn.Module):
     def sample_uncond(self, x, t=None, lvs=None):
         n, c, h, w = x.shape
         feats = self.prior(x)
-        pm, pv, xpp = feats[:, :self.zdim, ...], feats[:, self.zdim:self.zdim * 2, ...], feats[:, self.zdim * 2:, ...]
+        pm, pv, xpp = feats[:, :self.zdim,
+                            ...], feats[:, self.zdim:self.zdim * 2,
+                                        ...], feats[:, self.zdim * 2:, ...]
         x = x + xpp
         if lvs is not None:
             z = lvs
@@ -146,7 +187,8 @@ class DecBlock(nn.Module):
     def forward(self, xs, activations, get_latents=False):
         x, acts = self.get_inputs(xs, activations)
         if self.mixin is not None:
-            x = x + F.interpolate(xs[self.mixin][:, :x.shape[1], ...], scale_factor=self.base // self.mixin)
+            x = x + F.interpolate(xs[self.mixin][:, :x.shape[1], ...],
+                                  scale_factor=self.base // self.mixin)
         z, x, kl = self.sample(x, acts)
         x = x + self.z_fn(z)
         x = self.resnet(x)
@@ -160,9 +202,13 @@ class DecBlock(nn.Module):
             x = xs[self.base]
         except KeyError:
             ref = xs[list(xs.keys())[0]]
-            x = torch.zeros(dtype=ref.dtype, size=(ref.shape[0], self.widths[self.base], self.base, self.base), device=ref.device)
+            x = torch.zeros(dtype=ref.dtype,
+                            size=(ref.shape[0], self.widths[self.base],
+                                  self.base, self.base),
+                            device=ref.device)
         if self.mixin is not None:
-            x = x + F.interpolate(xs[self.mixin][:, :x.shape[1], ...], scale_factor=self.base // self.mixin)
+            x = x + F.interpolate(xs[self.mixin][:, :x.shape[1], ...],
+                                  scale_factor=self.base // self.mixin)
         z, x = self.sample_uncond(x, t, lvs=lvs)
         x = x + self.z_fn(z)
         x = self.resnet(x)
@@ -183,7 +229,10 @@ class Decoder(HModule):
             resos.add(res)
         self.resolutions = sorted(resos)
         self.dec_blocks = nn.ModuleList(dec_blocks)
-        self.bias_xs = nn.ParameterList([nn.Parameter(torch.zeros(1, self.widths[res], res, res)) for res in self.resolutions if res <= H.no_bias_above])
+        self.bias_xs = nn.ParameterList([
+            nn.Parameter(torch.zeros(1, self.widths[res], res, res))
+            for res in self.resolutions if res <= H.no_bias_above
+        ])
         self.out_net = DmolNet(H)
         self.gain = nn.Parameter(torch.ones(1, H.width, 1, 1))
         self.bias = nn.Parameter(torch.zeros(1, H.width, 1, 1))
@@ -222,6 +271,7 @@ class Decoder(HModule):
 
 
 class VAE(HModule):
+
     def build(self):
         self.encoder = Encoder(self.H)
         self.decoder = Decoder(self.H)
@@ -236,7 +286,9 @@ class VAE(HModule):
             rate_per_pixel += statdict['kl'].sum(dim=(1, 2, 3))
         rate_per_pixel /= ndims
         elbo = (distortion_per_pixel + rate_per_pixel).mean()
-        return dict(elbo=elbo, distortion=distortion_per_pixel.mean(), rate=rate_per_pixel.mean())
+        return dict(elbo=elbo,
+                    distortion=distortion_per_pixel.mean(),
+                    rate=rate_per_pixel.mean())
 
     def forward_get_latents(self, x):
         activations = self.encoder.forward(x)

@@ -102,7 +102,7 @@ HPARAMS_REGISTRY['bev64'] = bev64
 
 def parse_args_and_update_hparams(H, parser, s=None):
     args = parser.parse_args(s)
-    # args.hparam_sets = 'bev64'
+    # args.hparam_sets = 'bev64'  #'cifar10'  # 'bev64'
     valid_args = set(args.__dict__.keys())
     hparam_sets = [x for x in args.hparam_sets.split(',') if x]
     for hp_set in hparam_sets:
