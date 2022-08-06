@@ -196,7 +196,7 @@ def read_compressed_pickle(path):
         print(error)
 
 
-def bev(data_root):
+def bev(data_root, test_size=256):
     '''
     NOTE: Input data range is transformed (0, 255) --> (-1., +1.) during
           preprocessing.
@@ -222,9 +222,9 @@ def bev(data_root):
     samples = np.stack(samples)  # (N, H, W)
     samples = np.expand_dims(samples, -1)  # (N, H, W, 1)
 
-    trX = samples[100:]
-    vaX = samples[-100:]
-    teX = samples[-100:]
+    trX = samples[:-test_size]
+    vaX = samples[-test_size:]
+    teX = samples[-test_size:]
 
     # (N, H, W, C)
     return trX, vaX, teX
