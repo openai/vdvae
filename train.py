@@ -136,6 +136,13 @@ def evaluate(H, ema_vae, data_valid, preprocess_fn):
                         sampler=valid_sampler):
         data_input, target = preprocess_fn(x)
         stats_valid.append(eval_step(data_input, target, ema_vae))
+
+    if len(stats_valid) < 1:
+        raise Exception('Evaluation output list is empty. ' \
+                        f'Check sufficient val data size' \
+                        f'\n    len(valid_sampler) {len(valid_sampler)}' \
+                        f'\n    stats_valid {len(stats_valid)}')
+
     vals = [a['elbo'] for a in stats_valid]
     finites = np.array(vals)[np.isfinite(vals)]
     stats = dict(

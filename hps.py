@@ -90,11 +90,12 @@ HPARAMS_REGISTRY['ffhq1024'] = ffhq1024
 
 bev64 = Hyperparams()
 bev64.update(i32)
-bev64.n_batch = 4
+bev64.n_batch = 4 * 2  # def. BS * additional BS
+bev64.lr = 0.00015 * (4 / 32) * 4 * 2  # num_nodes * additional BS
 bev64.grad_clip = 220.0
-bev64.skip_threshold = 380.0
+bev64.skip_threshold = 100000000000000000.  #380.0
 bev64.dataset = 'bev'
-bev64.data_root = './bevs_64px'
+bev64.data_root = '/data/group1/z44406a/datasets/bevs_64px'
 bev64.dec_blocks = "1x2,4m1,4x3,8m4,8x7,16m8,16x15,32m16,32x31,64m32,64x12"
 bev64.enc_blocks = "64x11,64d2,32x20,32d2,16x9,16d2,8x8,8d2,4x7,4d4,1x5"
 HPARAMS_REGISTRY['bev64'] = bev64

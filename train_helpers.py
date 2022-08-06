@@ -1,23 +1,21 @@
-import torch
-import numpy as np
-from mpi4py import MPI
-import socket
 import argparse
-import os
 import json
+import os
+import socket
 import subprocess
-from hps import Hyperparams, parse_args_and_update_hparams, add_vae_arguments
-from utils import (logger,
-                   local_mpi_rank,
-                   mpi_size,
-                   maybe_download,
-                   mpi_rank)
-from data import mkdir_p
 from contextlib import contextmanager
+
+import numpy as np
+import torch
 import torch.distributed as dist
-from apex.optimizers import FusedAdam as AdamW
-from vae import VAE
+# from mpi4py import MPI
 from torch.nn.parallel.distributed import DistributedDataParallel
+
+from apex.optimizers import FusedAdam as AdamW
+from data import mkdir_p
+from hps import Hyperparams, add_vae_arguments, parse_args_and_update_hparams
+from utils import local_mpi_rank, logger, maybe_download, mpi_rank, mpi_size
+from vae import VAE
 
 
 def update_ema(vae, ema_vae, ema_rate):
@@ -69,13 +67,19 @@ def setup_mpi(H):
     H.mpi_size = mpi_size()
     H.local_rank = local_mpi_rank()
     H.rank = mpi_rank()
-    os.environ["RANK"] = str(H.rank)
-    os.environ["WORLD_SIZE"] = str(H.mpi_size)
-    os.environ["MASTER_PORT"] = str(H.port)
-    # os.environ["NCCL_LL_THRESHOLD"] = "0"
-    os.environ["MASTER_ADDR"] = MPI.COMM_WORLD.bcast(socket.gethostname(), root=0)
+    #os.environ["RANK"] = str(H.rank)
+    #os.environ["WORLD_SIZE"] = str(H.mpi_size)
+    #os.environ["MASTER_PORT"] = str(H.port)
+    #os.environ["NCCL_LL_THRESHOLD"] = "0"
+    #os.environ["NCCL_NSOCKS_PERTHREAD"] = "2" 
+    #os.environ["NCCL_SOCKET_NTHREADS"] = "8" 
+    #os.environ["NCCL_SOCKET_IFNAME"]="ens5"
+    #os.environ["MASTER_ADDR"] = MPI.COMM_WORLD.bcast(socket.gethostname(), root=0)
+    #H.local_rank = int(os.environ['LOCAL_RANK']) # os.environ["RANK"] % GPUS_PER_NODE  # mpi_rank() % gpus_per_node()
+    print('MASTER_ADDR', os.environ["MASTER_ADDR"], 'MY_ADDR', socket.gethostbyname(socket.getfqdn()), 'RANK', os.environ["RANK"], f'({H.rank})', 'local_rank', H.local_rank, f'({os.environ["LOCAL_RANK"]})', 'WORLD_SIZE', os.environ["WORLD_SIZE"], f'({H.mpi_size})')
     torch.cuda.set_device(H.local_rank)
-    dist.init_process_group(backend='nccl', init_method=f"env://")
+    dist.init_process_group(backend="gloo", init_method=f"env://")  # 'nccl'
+    
 
 
 def distributed_maybe_download(path, local_rank, mpi_size):

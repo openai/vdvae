@@ -1,19 +1,20 @@
-from mpi4py import MPI
-import os
 import json
+import os
+import subprocess
 import tempfile
+import time
+
 import numpy as np
 import torch
-import time
-import subprocess
 import torch.distributed as dist
+
+# from mpi4py import MPI
 
 
 def allreduce(x, average):
     if mpi_size() > 1:
         dist.all_reduce(x, dist.ReduceOp.SUM)
     return x / mpi_size() if average else x
-
 
 def get_cpu_stats_over_ranks(stat_dict):
     keys = sorted(stat_dict.keys())
@@ -115,18 +116,18 @@ def tile_images(images, d1=4, d2=4, border=1):
 
 
 def mpi_size():
-    return MPI.COMM_WORLD.Get_size()
+    return int(os.environ['WORLD_SIZE'])  # MPI.COMM_WORLD.Get_size()
 
 
 def mpi_rank():
-    return MPI.COMM_WORLD.Get_rank()
+    return int(os.environ['RANK'])  # MPI.COMM_WORLD.Get_rank()
 
 
 def num_nodes():
     nn = mpi_size()
-    if nn % 8 == 0:
-        return nn // 8
-    return nn // 8 + 1
+    if nn % 4 == 0:
+        return nn // 4
+    return nn // 4 + 1
 
 
 def gpus_per_node():
