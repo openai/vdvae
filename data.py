@@ -47,9 +47,15 @@ def set_up_data(H):
         H.image_channels = 3
         shift = -120.63838
         scale = 1. / 64.16736
-    elif H.dataset == 'bev':
+    elif H.dataset == 'bev64':
         trX, vaX, teX = bev(H.data_root)
         H.image_size = 64
+        H.image_channels = 1
+        shift = -127.5  # Range (0, 255) --> (-1, +1)
+        scale = 1. / 127.5
+    elif H.dataset == 'bev256':
+        trX, vaX, teX = bev(H.data_root)
+        H.image_size = 256
         H.image_channels = 1
         shift = -127.5  # Range (0, 255) --> (-1, +1)
         scale = 1. / 127.5
