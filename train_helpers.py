@@ -78,7 +78,7 @@ def setup_mpi(H):
     #H.local_rank = int(os.environ['LOCAL_RANK']) # os.environ["RANK"] % GPUS_PER_NODE  # mpi_rank() % gpus_per_node()
     print('MASTER_ADDR', os.environ["MASTER_ADDR"], 'MY_ADDR', socket.gethostbyname(socket.getfqdn()), 'RANK', os.environ["RANK"], f'({H.rank})', 'local_rank', H.local_rank, f'({os.environ["LOCAL_RANK"]})', 'WORLD_SIZE', os.environ["WORLD_SIZE"], f'({H.mpi_size})')
     torch.cuda.set_device(H.local_rank)
-    dist.init_process_group(backend="gloo", init_method=f"env://")  # 'nccl'
+    dist.init_process_group(backend="nccl", init_method=f"env://")  # 'nccl' 'gloo'
     
 
 

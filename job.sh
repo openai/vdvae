@@ -1,6 +1,6 @@
 #!/bin/bash -x
-#PJM -L rscgrp=cx-small
-#PJM -L node=4
+#PJM -L rscgrp=cx-single
+#PJM -L node=1
 #PJM -L elapse=128:00:00
 #PJM -j
 #PJM -S
@@ -17,14 +17,14 @@ source /home/z44406a/.pyenv/versions/vdvae2/bin/activate
 # Distributed setting
 # -np == #nodes
 
-export WORLD_SIZE=16
+export WORLD_SIZE=4
 export MASTER_PORT=12356
 echo "WORLD_SIZE=${WORLD_SIZE}"
 echo "MASTER_PORT=${MASTER_PORT}"
 
 
 mpirun \
-    -np 4 \
+    -np 1 \
     -npernode 1 \
     -bind-to none \
     -map-by slot \

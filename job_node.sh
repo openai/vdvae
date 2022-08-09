@@ -2,6 +2,7 @@
 
 set -euo pipefail
 
+source /etc/profile.d/modules.sh
 module load gcc/8.4.0
 module load python/3.8.3
 module load cuda/11.6.2
@@ -28,7 +29,7 @@ for i in 0 1 2 3; do
     export RANK=$((${i} + 4 * ${NODE_RANK}))
     export LOCAL_RANK=$i
     echo "MASTER_ADDR=${MASTER_ADDR}, MY_ADDR=${MY_ADDR}, NODE_RANK=${NODE_RANK}, RANK=${RANK}, LOCAL_RANK=${LOCAL_RANK}"
-    python train.py --hps bev64 --port 12356 --save_dir ./saved_models_1node_01
+    python train.py --hps bev256 --port 12356 --save_dir ./saved_models_256_1node_05
 ) & 
 done
 wait
