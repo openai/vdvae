@@ -51,14 +51,14 @@ def set_up_data(H):
         trX, vaX, teX = bev(H.data_root)
         H.image_size = 64
         H.image_channels = 1
-        shift = -127.5  # Range (0, 255) --> (-1, +1)
-        scale = 1. / 127.5
+        shift = 0.
+        scale = 1.
     elif H.dataset == 'bev256':
         trX, vaX, teX = bev(H.data_root)
         H.image_size = 256
         H.image_channels = 1
-        shift = -127.5  # Range (0, 255) --> (-1, +1)
-        scale = 1. / 127.5
+        shift = 0.
+        scale = 1.
     else:
         raise ValueError('unknown dataset: ', H.dataset)
 
@@ -219,14 +219,16 @@ def bev(data_root, test_size=256):
     for sample_path in sample_paths:
         sample = read_compressed_pickle(sample_path)
         road_present = sample['road_present']  # (H, W)
+        road_future = sample['road_future']
         # Convert (0., 1.) prob values --> (0, 255) image values
-        road_present = np.round(road_present * 255).astype(np.uint8)
+        # road_present = np.round(road_present * 255).astype(np.uint8)
+        road_present = road_present.astype(np.float32)
+        road_future = road_future.astype(np.float32)
 
-        # road_present = np.stack([road_present, road_present, road_present], -1)
-        samples.append(road_present)
+        sample = np.stack([road_present, road_future], -1)
+        samples.append(sample)
 
     samples = np.stack(samples)  # (N, H, W)
-    samples = np.expand_dims(samples, -1)  # (N, H, W, 1)
 
     trX = samples[:-test_size]
     vaX = samples[-test_size:]

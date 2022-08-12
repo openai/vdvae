@@ -91,7 +91,7 @@ HPARAMS_REGISTRY['ffhq1024'] = ffhq1024
 bev64 = Hyperparams()
 bev64.update(i32)
 bev64.n_batch = 4 * 2  # def. BS * additional BS
-bev64.width = 256  # 512
+bev64.width = 64  # Default width (match largest custom_width?)
 bev64.lr = 0.00015 * (4 / 32) * 4 * 2  # num_nodes * additional BS
 bev64.grad_clip = 220.0
 bev64.skip_threshold = 100000000000000000.  # 380.0
@@ -99,12 +99,13 @@ bev64.dataset = 'bev64'
 bev64.data_root = '/data/group1/z44406a/datasets/bevs_64px'
 bev64.dec_blocks = "1x2,4m1,4x3,8m4,8x7,16m8,16x15,32m16,32x31,64m32,64x12"
 bev64.enc_blocks = "64x11,64d2,32x20,32d2,16x9,16d2,8x8,8d2,4x7,4d4,1x5"
+bev64.custom_width_str = "64:64,32:64,16:256,8:256,4:512,1:512"  # res:width
 HPARAMS_REGISTRY['bev64'] = bev64
 
 bev256 = Hyperparams()
 bev256.update(bev64)
 bev256.n_batch = 1 * 4  # def. BS * additional BS
-bev256.width = 256  # 512
+bev256.width = 256  # Default width (match largest custom_width?)
 bev256.lr = 0.00015 * (4 / 32) * 1 * 4  # num_nodes * additional BS
 bev256.dataset = 'bev256'
 bev256.data_root = './bevs_256px'
@@ -115,6 +116,7 @@ bev256.epochs_per_eval_save = 1
 # bev256.num_temperatures_visualize = 1
 bev256.dec_blocks = "1x2,4m1,4x3,8m4,8x4,16m8,16x9,32m16,32x21,64m32,64x13,128m64,128x7,256m128"
 bev256.enc_blocks = "256x3,256d2,128x8,128d2,64x12,64d2,32x17,32d2,16x7,16d2,8x5,8d2,4x5,4d4,1x4"
+bev256.custom_width_str = "256:128,128:128,64:128,32:256,16:256,8:512,4:512,1:512"  # res:width
 bev256.no_bias_above = 64
 bev256.grad_clip = 130.  # 220.0 #130.
 bev256.skip_threshold = 10000.  # 180.

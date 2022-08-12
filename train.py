@@ -15,8 +15,38 @@ from utils import get_cpu_stats_over_ranks
 
 def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     t0 = time.time()
+    
     vae.zero_grad()
-    stats = vae.forward(data_input, target)
+
+    B = data_input.shape[0]
+    device = data_input.get_device()
+
+    x_1_prob = data_input[:, :, :, 0:1]  # Extract 'road_present' tensors
+    # x_2_prob = data_input[:, :, :, 1:2]  # Extract 'road_future' tensors
+
+    # Value range (0, 1) --> (-1, +1)
+    x_1 = 2 * x_1_prob - 1
+    # x_2 = 2 * x_2_prob - 1
+
+    # Observable mask
+    mask_1s = torch.logical_or(x_1 < 0., x_1 > 0.).to(device)
+    # mask_2s = torch.logical_or(x_2 < 0., x_2 > 0.).to(device)
+    mask_1s = mask_1s[:, :, :, 0]  # (B, H, W)
+    # mask_2s = mask_2s[:, :, :, 0]
+
+    # Past + Future sample
+    # x_2_full = x_1.detach().clone()
+    # x_2_full[mask_2s] = 0
+    # x_2_full += x_2
+    # x_2 = x_2_full
+    # mask_2s = torch.logical_or(mask_1s, mask_2s)
+
+    # x_cat = torch.concat((x_1, x_2), dim=0)
+    # x_prob_cat = torch.concat((x_1_prob, x_2_prob), dim=0)
+    # mask_cat = torch.concat((mask_1s, mask_2s), dim=0)
+
+    stats = vae.forward(x_1, x_1, mask_1s)
+
     stats['elbo'].backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(),
                                                H.grad_clip).item()
@@ -44,7 +74,14 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
 def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
-        stats = ema_vae.forward(data_input, target)
+        device = data_input.get_device()
+        x_1_prob = data_input[:, :, :, 0:1]  # Extract 'road_present' tensors
+        # Value range (0, 1) --> (-1, +1)
+        x_1 = 2 * x_1_prob - 1
+        # Observable mask
+        mask_1s = torch.logical_or(x_1 < 0., x_1 > 0.).to(device)
+        mask_1s = mask_1s[:, :, :, 0]  # (B, H, W)
+        stats = ema_vae.forward(x_1, x_1, mask_1s)
     stats = get_cpu_stats_over_ranks(stats)
     return stats
 
@@ -67,6 +104,13 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                                        rank=H.rank)
     viz_batch_original, viz_batch_processed = get_sample_for_visualization(
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
+    
+    # Remove 'future' sample
+    viz_batch_original = viz_batch_original[:, :, :, 0:1]
+    viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
+    # Convert to image value range
+    viz_batch_original = (255 * viz_batch_original)
+
     early_evals = set([1] + [2**exp for exp in range(3, 14)])
     stats = []
     iters_since_starting = 0
@@ -158,7 +202,7 @@ def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
     zs = [
         s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed)
     ]
-    batches = [viz_batch_original.numpy()]
+    batches = [viz_batch_original.numpy().astype(np.uint8)]
     mb = viz_batch_processed.shape[0]
     lv_points = np.floor(
         np.linspace(0, 1, H.num_variables_visualize + 2) *

@@ -17,9 +17,9 @@ export MKL_THREADING_LAYER=GNU
 export OMP_NUM_THREADS=1
 
 # distributed setting
-MY_ADDR=$(hostname -I | awk '{print $1}')
+export MY_ADDR=$(hostname -I | awk '{print $1}')
 export MASTER_ADDR=$(head -n 1 ${PJM_O_NODEINF})
-NODE_RANK=$(cat ${PJM_O_NODEINF} | awk '{print NR-1 " " $1}' | grep ${MY_ADDR}$ | awk '{print $1}')
+export NODE_RANK=$(cat ${PJM_O_NODEINF} | awk '{print NR-1 " " $1}' | grep ${MY_ADDR}$ | awk '{print $1}')
 #echo "MY_ADDR=${MY_ADDR}"
 #echo "MASTER_ADDR=${MASTER_ADDR}"
 #echo "NODE_RANK=${NODE_RANK}"
@@ -29,7 +29,7 @@ for i in 0 1 2 3; do
     export RANK=$((${i} + 4 * ${NODE_RANK}))
     export LOCAL_RANK=$i
     echo "MASTER_ADDR=${MASTER_ADDR}, MY_ADDR=${MY_ADDR}, NODE_RANK=${NODE_RANK}, RANK=${RANK}, LOCAL_RANK=${LOCAL_RANK}"
-    python train.py --hps bev256 --port 12356 --save_dir ./saved_models_256_1node_05
+    python train.py --hps bev64 --port 12356 --save_dir ./saved_models_64_1node_07
 ) & 
 done
 wait

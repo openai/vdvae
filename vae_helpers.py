@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 DISTR_PARAM_NUM = 3
-
+NUM_CLASSES = 100
 
 @torch.jit.script
 def gaussian_analytical_kl(mu1, mu2, logsigma1, logsigma2):
@@ -86,7 +86,7 @@ def const_min(t, constant):
     return torch.min(t, other)
 
 
-def discretized_mix_logistic_loss(x, l, low_bit=False):
+def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
     """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval """
     # Adapted from https://github.com/openai/pixel-cnn/blob/master/pixel_cnn_pp/nn.py
     # true image (i.e. labels) to regress to, e.g. (B,32,32,3)
@@ -129,9 +129,9 @@ def discretized_mix_logistic_loss(x, l, low_bit=False):
         cdf_plus = torch.sigmoid(plus_in)
         min_in = inv_stdv * (centered_x - 1. / 31.)
     else:
-        plus_in = inv_stdv * (centered_x + 1. / 255.)
+        plus_in = inv_stdv * (centered_x + 1. / NUM_CLASSES)
         cdf_plus = torch.sigmoid(plus_in)
-        min_in = inv_stdv * (centered_x - 1. / 255.)
+        min_in = inv_stdv * (centered_x - 1. / NUM_CLASSES)
     cdf_min = torch.sigmoid(min_in)
     log_cdf_plus = plus_in - F.softplus(
         plus_in)  # log probability for edge case of 0 (before scaling)
@@ -167,10 +167,14 @@ def discretized_mix_logistic_loss(x, l, low_bit=False):
                 x > 0.999, log_one_minus_cdf_min,
                 torch.where(cdf_delta > 1e-5,
                             torch.log(const_max(cdf_delta, 1e-12)),
-                            log_pdf_mid - np.log(127.5))))
+                            log_pdf_mid - np.log(0.5 * NUM_CLASSES))))
     log_probs = log_probs.sum(dim=3) + log_prob_from_logits(logit_probs)
     mixture_probs = torch.logsumexp(log_probs, -1)
-    return -1. * mixture_probs.sum(dim=[1, 2]) / np.prod(xs[1:])
+
+    mixture_probs = mixture_probs * mask
+    mixture_probs = mixture_probs.sum(dim=[1, 2])
+    return -1. * torch.div(mixture_probs, mask.sum(dim=[1, 2]))
+    # return -1. * mixture_probs.sum(dim=[1, 2]) / np.prod(xs[1:])
 
 
 def sample_from_discretized_mix_logistic(l, nr_mix, ch=3):
@@ -243,9 +247,10 @@ class DmolNet(nn.Module):
                                  stride=1,
                                  padding=0)
 
-    def nll(self, px_z, x):
+    def nll(self, px_z, x, mask):
         return discretized_mix_logistic_loss(x=x,
                                              l=self.forward(px_z),
+                                             mask=mask,
                                              low_bit=self.H.dataset
                                              in ['ffhq_256'])
 
