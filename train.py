@@ -52,7 +52,6 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
         mask_prob = H.rnd_noise_ratio * torch.rand(1, device=torch.device(device))
         mask = torch.rand(
             (B, h, w, c), device=torch.device(device)) < mask_prob
-        # mask = torch.tile(mask, (B, c, 1, 1))
         x_1[mask] = 0
 
     stats = vae.forward(x_1, x_1_target, mask_1s)
@@ -105,9 +104,7 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
     for x in DataLoader(data, batch_size=num):
         break
     # Convert to image value range
-    orig_image = (x[0] * 255.0).to(torch.uint8)
-    # orig_image = (x[0] * 255.0).to(torch.uint8).permute(
-    #     0, 2, 3, 1) if dataset == 'ffhq_1024' else x[0]
+    orig_image = (x * 255.0).to(torch.uint8)
     preprocessed = preprocess_fn(x)[0]
     # TODO Centralize the (0, 1) --> (-1, 1) transformation in the preprocessor
     preprocessed = 2 * preprocessed -1
