@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 DISTR_PARAM_NUM = 3
-NUM_CLASSES = 256
+NUM_CLASSES = 100
 
 @torch.jit.script
 def gaussian_analytical_kl(mu1, mu2, logsigma1, logsigma2):

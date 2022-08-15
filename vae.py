@@ -277,6 +277,11 @@ class VAE(HModule):
         self.decoder = Decoder(self.H)
 
     def forward(self, x, x_target, mask=None):
+        '''
+        Args:
+            x: Interval (-1, 1)
+            x_target: Interval (-1, 1)
+        '''
         
         device = x_target.get_device()
         
