@@ -15,7 +15,7 @@ from utils import get_cpu_stats_over_ranks
 
 def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     t0 = time.time()
-    
+
     vae.zero_grad()
 
     B = data_input.shape[0]
@@ -49,7 +49,8 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
     if H.rnd_noise_ratio > 0.:
         B, h, w, c = x_1.shape
-        mask_prob = H.rnd_noise_ratio * torch.rand(1, device=torch.device(device))
+        mask_prob = H.rnd_noise_ratio * torch.rand(1,
+                                                   device=torch.device(device))
         mask = torch.rand(
             (B, h, w, c), device=torch.device(device)) < mask_prob
         x_1[mask] = 0
@@ -107,10 +108,10 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
     orig_image = (x * 255.0).to(torch.uint8)
     preprocessed = preprocess_fn(x)[0]
     # TODO Centralize the (0, 1) --> (-1, 1) transformation in the preprocessor
-    preprocessed = 2 * preprocessed -1
+    preprocessed = 2 * preprocessed - 1
     # Remove 'future' sample
-    orig_image = orig_image[:,:,:,0:1]
-    preprocessed = preprocessed[:,:,:,0:1]
+    orig_image = orig_image[:, :, :, 0:1]
+    preprocessed = preprocessed[:, :, :, 0:1]
     return orig_image, preprocessed
 
 

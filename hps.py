@@ -2,7 +2,6 @@ HPARAMS_REGISTRY = {}
 
 
 class Hyperparams(dict):
-
     def __getattr__(self, attr):
         try:
             return self[attr]
@@ -104,9 +103,9 @@ HPARAMS_REGISTRY['bev64'] = bev64
 
 bev256 = Hyperparams()
 bev256.update(bev64)
-bev256.n_batch = 4 * 2  # def. BS * additional BS
+bev256.n_batch = 4 * 3  # def. BS * additional BS
 bev256.width = 128  # Default width (match largest custom_width?)
-bev256.lr = 0.00015 * (4 / 32) * 4 * 2  # num_nodes * additional BS
+bev256.lr = 0.00015 * (4 / 32) * 4 * 1  # num_nodes * additional BS
 bev256.dataset = 'bev256'
 bev256.data_root = '/data/group1/z44406a/datasets/bevs_256px'
 bev256.epochs_per_eval = 1

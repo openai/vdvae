@@ -262,7 +262,7 @@ class BEVDataset(Dataset):
         if reduced_subset_size > 0:
             random.shuffle(self.sample_paths)
             self.sample_paths = self.sample_paths[:reduced_subset_size]
-        
+
         self.do_rand_rot = do_rand_rot
 
     def __len__(self):
@@ -289,7 +289,6 @@ class BEVDataset(Dataset):
             k = random.randint(0, 3)
             sample = torch.rot90(sample, k, [0, 1])
 
-
         return sample
 
 
@@ -307,9 +306,9 @@ if __name__ == '__main__':
 
         print(idx, sample.shape)
         for batch_idx in range(4):
-            plt.subplot(1,4,batch_idx+1)
-            plt.imshow(sample[batch_idx,:,:,0])
+            plt.subplot(1, 4, batch_idx + 1)
+            plt.imshow(sample[batch_idx, :, :, 0])
         plt.savefig(f'dataset_viz_{idx}.png')
-        
+
         if idx == 2:
             break
