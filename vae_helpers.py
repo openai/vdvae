@@ -283,7 +283,7 @@ class DmolNet(nn.Module):
         # im = sample_from_discretized_mix_logistic(self.forward(px_z),
         #                                           self.H.num_mixtures, self.ch)
         x_hat = self.forward(px_z)
-        x_hat = (x_hat + 1.0) * 127.5
+        x_hat = x_hat * 255.
         x_hat = x_hat.detach().cpu().numpy()
         x_hat = np.minimum(np.maximum(0.0, x_hat), 255.0).astype(np.uint8)
         return x_hat

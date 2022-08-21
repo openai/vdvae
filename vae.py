@@ -277,6 +277,11 @@ class VAE(HModule):
         self.decoder = Decoder(self.H)
 
     def forward(self, x, x_target, mask=None):
+        '''
+        Args:
+            x: Interval (-1, 1)
+            x_target: Interval (-1, 1)
+        '''
         
         device = x_target.get_device()
         
@@ -292,23 +297,8 @@ class VAE(HModule):
 
         rate_per_pixel = torch.zeros_like(distortion_per_pixel)
         ndims = np.prod(x.shape[1:])
-
-        res = mask.shape[1]
-        ds_mask = mask.unsqueeze(1).to(torch.float).to(device)  # (B, 1, H, W)
-        ds_masks = {}
-        while True:
-            ds_masks[res] = ds_mask
-            if res == 1:
-                break
-            ds_mask = F.avg_pool2d(ds_mask, 2)
-            res //= 2
-
         for statdict in stats:
-            kl_map = statdict['kl']
-            kl_map_size = kl_map.shape[-1]
-            ds_mask = ds_masks[kl_map_size]
-            kl_map = ds_mask * kl_map
-            rate_per_pixel += kl_map.sum(dim=(1, 2, 3))
+            rate_per_pixel += statdict['kl'].sum(dim=(1, 2, 3))
         rate_per_pixel /= ndims
         elbo = (distortion_per_pixel + rate_per_pixel).mean()
         return dict(elbo=elbo,

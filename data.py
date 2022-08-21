@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torchvision.transforms as transforms
 from sklearn.model_selection import train_test_split
-from torch.utils.data import TensorDataset
+from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchvision.datasets import ImageFolder
 
 
@@ -48,13 +48,23 @@ def set_up_data(H):
         shift = -120.63838
         scale = 1. / 64.16736
     elif H.dataset == 'bev64':
-        trX, vaX, teX = bev(H.data_root)
+        train_data = BEVDataset(H.data_root, do_rand_rot=True)
+        valid_data = BEVDataset(H.data_root, reduced_subset_size=256)
+        # Create a data matrix
+        dataloader = DataLoader(valid_data, len(valid_data))
+        vaX = next(iter(dataloader)).numpy()
+        teX = vaX
         H.image_size = 64
         H.image_channels = 1
         shift = 0.
         scale = 1.
     elif H.dataset == 'bev256':
-        trX, vaX, teX = bev(H.data_root)
+        train_data = BEVDataset(H.data_root, do_rand_rot=True)
+        valid_data = BEVDataset(H.data_root, reduced_subset_size=256)
+        # Create a data matrix
+        dataloader = DataLoader(valid_data, len(valid_data))
+        vaX = next(iter(dataloader)).numpy()
+        teX = vaX
         H.image_size = 256
         H.image_channels = 1
         shift = 0.
@@ -79,6 +89,8 @@ def set_up_data(H):
         train_data = ImageFolder(trX, transforms.ToTensor())
         valid_data = ImageFolder(eval_dataset, transforms.ToTensor())
         untranspose = True
+    elif H.dataset == 'bev64' or H.dataset == 'bev256':
+        untranspose = False
     else:
         train_data = TensorDataset(torch.as_tensor(trX))
         valid_data = TensorDataset(torch.as_tensor(eval_dataset))
@@ -95,7 +107,7 @@ def set_up_data(H):
         'as well as the input processed for the loss'
         if untranspose:
             x[0] = x[0].permute(0, 2, 3, 1)
-        inp = x[0].cuda(non_blocking=True).float()
+        inp = x.cuda(non_blocking=True).float()
         out = inp.clone()
         inp.add_(shift).mul_(scale)
         if do_low_bit:
@@ -206,7 +218,6 @@ def bev(data_root, test_size=256):
     '''
     NOTE: Input data range is transformed (0, 255) --> (-1., +1.) during
           preprocessing.
-
     Returns:
         trX: Training data matrix (N, H, W, C) of images (uint8) with value
              range (0, 255).
@@ -236,3 +247,68 @@ def bev(data_root, test_size=256):
 
     # (N, H, W, C)
     return trX, vaX, teX
+
+
+class BEVDataset(Dataset):
+
+    def __init__(self, root_dir, do_rand_rot=False, reduced_subset_size=-1):
+        '''
+        Args:
+            root_dir: 
+            do_rand_rot:
+            reduced_subset_size: If positive integer ==> Sample size
+        '''
+        self.sample_paths = glob.glob(os.path.join(root_dir, '*', '*.pkl.gz'))
+        if reduced_subset_size > 0:
+            random.shuffle(self.sample_paths)
+            self.sample_paths = self.sample_paths[:reduced_subset_size]
+
+        self.do_rand_rot = do_rand_rot
+
+    def __len__(self):
+        return len(self.sample_paths)
+
+    def __getitem__(self, idx):
+        '''
+        Returns:
+            sample: BEV sample (H,W,C) in (0, 1) interval.
+        '''
+        sample_path = self.sample_paths[idx]
+
+        sample = read_compressed_pickle(sample_path)
+        road_present = sample['road_present']  # (H, W)
+        road_future = sample['road_future']
+        road_present = road_present.astype(np.float32)
+        road_future = road_future.astype(np.float32)
+
+        sample = np.stack([road_present, road_future], -1)
+
+        sample = torch.tensor(sample)
+
+        if self.do_rand_rot:
+            k = random.randint(0, 3)
+            sample = torch.rot90(sample, k, [0, 1])
+
+        return sample
+
+
+if __name__ == '__main__':
+
+    import matplotlib.pyplot as plt
+    from torch.utils.data import DataLoader
+
+    dataset = BEVDataset('./bevs_64px/', True, 100)
+    print(len(dataset))
+
+    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+
+    for idx, sample in enumerate(dataloader):
+
+        print(idx, sample.shape)
+        for batch_idx in range(4):
+            plt.subplot(1, 4, batch_idx + 1)
+            plt.imshow(sample[batch_idx, :, :, 0])
+        plt.savefig(f'dataset_viz_{idx}.png')
+
+        if idx == 2:
+            break
