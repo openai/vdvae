@@ -104,11 +104,11 @@ HPARAMS_REGISTRY['bev64'] = bev64
 
 bev256 = Hyperparams()
 bev256.update(bev64)
-bev256.n_batch = 1 * 4  # def. BS * additional BS
-bev256.width = 256  # Default width (match largest custom_width?)
-bev256.lr = 0.00015 * (4 / 32) * 1 * 4  # num_nodes * additional BS
+bev256.n_batch = 4 * 3  # def. BS * additional BS
+bev256.width = 128  # Default width (match largest custom_width?)
+bev256.lr = 0.00015 * (4 / 32) * 4 * 1  # num_nodes * additional BS
 bev256.dataset = 'bev256'
-bev256.data_root = './bevs_256px'
+bev256.data_root = '/data/group1/z44406a/datasets/bevs_256px'
 bev256.epochs_per_eval = 1
 bev256.epochs_per_eval_save = 1
 # bev256.num_images_visualize = 2
@@ -125,7 +125,6 @@ HPARAMS_REGISTRY['bev256'] = bev256
 
 def parse_args_and_update_hparams(H, parser, s=None):
     args = parser.parse_args(s)
-    args.hparam_sets = 'bev64'  # 'cifar10', 'bev64', 'bev256'
     valid_args = set(args.__dict__.keys())
     hparam_sets = [x for x in args.hparam_sets.split(',') if x]
     for hp_set in hparam_sets:
@@ -190,4 +189,7 @@ def add_vae_arguments(parser):
     parser.add_argument('--num_images_visualize', type=int, default=8)
     parser.add_argument('--num_variables_visualize', type=int, default=6)
     parser.add_argument('--num_temperatures_visualize', type=int, default=3)
+
+    # BEV
+    parser.add_argument('--rnd_noise_ratio', type=float, default=0.)
     return parser

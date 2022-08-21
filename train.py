@@ -15,7 +15,7 @@ from utils import get_cpu_stats_over_ranks
 
 def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     t0 = time.time()
-    
+
     vae.zero_grad()
 
     B = data_input.shape[0]
@@ -44,6 +44,14 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     # x_cat = torch.concat((x_1, x_2), dim=0)
     # x_prob_cat = torch.concat((x_1_prob, x_2_prob), dim=0)
     # mask_cat = torch.concat((mask_1s, mask_2s), dim=0)
+
+    if H.rnd_noise_ratio > 0.:
+        B, h, w, c = x_1.shape
+        mask_prob = H.rnd_noise_ratio * torch.rand(1,
+                                                   device=torch.device(device))
+        mask = torch.rand(
+            (B, h, w, c), device=torch.device(device)) < mask_prob
+        x_1[mask] = 0
 
     stats = vae.forward(x_1, x_1, mask_1s)
 
@@ -87,11 +95,21 @@ def eval_step(data_input, target, ema_vae):
 
 
 def get_sample_for_visualization(data, preprocess_fn, num, dataset):
+    '''
+    Returns
+        orig_image: RGB (np.uint8) image w. dim (B, H, W, C).
+        preprocessed: Tensor in range (-1, 1) w. dim (B, H, W, C).
+    '''
     for x in DataLoader(data, batch_size=num):
         break
-    orig_image = (x[0] * 255.0).to(torch.uint8).permute(
-        0, 2, 3, 1) if dataset == 'ffhq_1024' else x[0]
+    # Convert to image value range
+    orig_image = (x * 255.0).to(torch.uint8)
     preprocessed = preprocess_fn(x)[0]
+    # TODO Centralize the (0, 1) --> (-1, 1) transformation in the preprocessor
+    preprocessed = 2 * preprocessed - 1
+    # Remove 'future' sample
+    orig_image = orig_image[:, :, :, 0:1]
+    preprocessed = preprocessed[:, :, :, 0:1]
     return orig_image, preprocessed
 
 
@@ -104,13 +122,6 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                                        rank=H.rank)
     viz_batch_original, viz_batch_processed = get_sample_for_visualization(
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
-    
-    # Remove 'future' sample
-    viz_batch_original = viz_batch_original[:, :, :, 0:1]
-    viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
-    # Convert to image value range
-    viz_batch_original = (255 * viz_batch_original)
-
     early_evals = set([1] + [2**exp for exp in range(3, 14)])
     stats = []
     iters_since_starting = 0
@@ -225,6 +236,10 @@ def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
 
 def run_test_eval(H, ema_vae, data_test, preprocess_fn, logprint):
     print('evaluating')
+    viz_batch_original, viz_batch_processed = get_sample_for_visualization(
+        data_test, preprocess_fn, H.num_images_visualize, H.dataset)
+    write_images(H, ema_vae, viz_batch_original, viz_batch_processed,
+                 f'{H.save_dir}/samples-eval.png', logprint)
     stats = evaluate(H, ema_vae, data_test, preprocess_fn)
     print('test results')
     for k in stats:
