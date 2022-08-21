@@ -6,6 +6,7 @@ import torch.nn.functional as F
 DISTR_PARAM_NUM = 3
 NUM_CLASSES = 100
 
+
 @torch.jit.script
 def gaussian_analytical_kl(mu1, mu2, logsigma1, logsigma2):
     return -0.5 + logsigma2 - logsigma1 + 0.5 * (
@@ -84,6 +85,20 @@ def const_max(t, constant):
 def const_min(t, constant):
     other = torch.ones_like(t) * constant
     return torch.min(t, other)
+
+
+def binary_cross_entropy(x_hat, x, obs_mask=None, eps=1e-12):
+    '''
+    Args:
+        x_hat: Model output tensor (N,C,H,W) in interval (0,1)
+        x: Model input tensor (N,C,H,W) in interval (0,1)
+    '''
+    log_pxz = x * torch.log(x_hat + eps) + (1 - x) * torch.log(1 - x_hat + eps)
+
+    if obs_mask is not None:
+        log_pxz = obs_mask * log_pxz
+
+    return log_pxz.sum(dim=(1, 2, 3))
 
 
 def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
@@ -240,28 +255,35 @@ class DmolNet(nn.Module):
         self.H = H
         self.width = H.width
         self.ch = H.image_channels
-        num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
-        self.out_conv = get_conv(H.width,
-                                 H.num_mixtures * num_mix_distr_params,
-                                 kernel_size=1,
-                                 stride=1,
-                                 padding=0)
+        # num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
+        self.out_conv = get_conv(
+            H.width,
+            1,  # H.num_mixtures * num_mix_distr_params,
+            kernel_size=1,
+            stride=1,
+            padding=0)
 
     def nll(self, px_z, x, mask):
-        return discretized_mix_logistic_loss(x=x,
-                                             l=self.forward(px_z),
-                                             mask=mask,
-                                             low_bit=self.H.dataset
-                                             in ['ffhq_256'])
+        x_hat = self.forward(px_z)
+        mask = mask.unsqueeze(-1)
+        recon_loss = -1. * binary_cross_entropy(x_hat, x, mask)
+        return recon_loss
+        # return discretized_mix_logistic_loss(x=x,
+        #                                      l=self.forward(px_z),
+        #                                      mask=mask,
+        #                                      low_bit=self.H.dataset
+        #                                      in ['ffhq_256'])
 
     def forward(self, px_z):
-        xhat = self.out_conv(px_z)
-        return xhat.permute(0, 2, 3, 1)
+        x_hat = self.out_conv(px_z)
+        x_hat = torch.sigmoid(x_hat)
+        return x_hat.permute(0, 2, 3, 1)
 
     def sample(self, px_z):
-        im = sample_from_discretized_mix_logistic(self.forward(px_z),
-                                                  self.H.num_mixtures, self.ch)
-        xhat = (im + 1.0) * 127.5
-        xhat = xhat.detach().cpu().numpy()
-        xhat = np.minimum(np.maximum(0.0, xhat), 255.0).astype(np.uint8)
-        return xhat
+        # im = sample_from_discretized_mix_logistic(self.forward(px_z),
+        #                                           self.H.num_mixtures, self.ch)
+        x_hat = self.forward(px_z)
+        x_hat = (x_hat + 1.0) * 127.5
+        x_hat = x_hat.detach().cpu().numpy()
+        x_hat = np.minimum(np.maximum(0.0, x_hat), 255.0).astype(np.uint8)
+        return x_hat

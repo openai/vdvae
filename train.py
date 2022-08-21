@@ -15,7 +15,7 @@ from utils import get_cpu_stats_over_ranks
 
 def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     t0 = time.time()
-    
+
     vae.zero_grad()
 
     B = data_input.shape[0]
@@ -45,7 +45,7 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     # x_prob_cat = torch.concat((x_1_prob, x_2_prob), dim=0)
     # mask_cat = torch.concat((mask_1s, mask_2s), dim=0)
 
-    stats = vae.forward(x_1, x_1, mask_1s)
+    stats = vae.forward(x_1, x_1_prob, mask_1s)
 
     stats['elbo'].backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(),
@@ -104,7 +104,7 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                                        rank=H.rank)
     viz_batch_original, viz_batch_processed = get_sample_for_visualization(
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
-    
+
     # Remove 'future' sample
     viz_batch_original = viz_batch_original[:, :, :, 0:1]
     viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
