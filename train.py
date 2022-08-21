@@ -28,6 +28,8 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     x_1 = 2 * x_1_prob - 1
     # x_2 = 2 * x_2_prob - 1
 
+    x_1_target = x_1.detach().clone()
+
     # Observable mask
     mask_1s = torch.logical_or(x_1 < 0., x_1 > 0.).to(device)
     # mask_2s = torch.logical_or(x_2 < 0., x_2 > 0.).to(device)
@@ -53,7 +55,7 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
             (B, h, w, c), device=torch.device(device)) < mask_prob
         x_1[mask] = 0
 
-    stats = vae.forward(x_1, x_1, mask_1s)
+    stats = vae.forward(x_1, x_1_target, mask_1s)
 
     stats['elbo'].backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(),
@@ -210,10 +212,15 @@ def evaluate(H, ema_vae, data_valid, preprocess_fn):
 
 def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
                  logprint):
+    '''
+    Args:
+        viz_batch_original: RGB (np.uint8) tensor (B,H,W,C).
+        viz_batch_processed: Float tensor (B,H,W,C) in the (-1, 1) interval.
+    '''
     zs = [
         s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed)
     ]
-    batches = [viz_batch_original.numpy().astype(np.uint8)]
+    batches = [viz_batch_original.numpy()]
     mb = viz_batch_processed.shape[0]
     lv_points = np.floor(
         np.linspace(0, 1, H.num_variables_visualize + 2) *

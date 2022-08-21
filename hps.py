@@ -2,7 +2,6 @@ HPARAMS_REGISTRY = {}
 
 
 class Hyperparams(dict):
-
     def __getattr__(self, attr):
         try:
             return self[attr]
@@ -90,7 +89,7 @@ HPARAMS_REGISTRY['ffhq1024'] = ffhq1024
 
 bev64 = Hyperparams()
 bev64.update(i32)
-bev64.n_batch = 4 * 2  # def. BS * additional BS
+bev64.n_batch = 4 * 4  # def. BS * additional BS
 bev64.width = 64  # Default width (match largest custom_width?)
 bev64.lr = 0.00015 * (4 / 32) * 4 * 2  # num_nodes * additional BS
 bev64.grad_clip = 220.0
