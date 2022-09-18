@@ -1,3 +1,4 @@
+import copy
 import glob
 import gzip
 import os
@@ -7,6 +8,8 @@ import random
 import numpy as np
 import torch
 import torchvision.transforms as transforms
+from scipy import ndimage
+from scipy.spatial import distance
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from torchvision.datasets import ImageFolder
@@ -47,28 +50,28 @@ def set_up_data(H):
         H.image_channels = 3
         shift = -120.63838
         scale = 1. / 64.16736
-    elif H.dataset == 'bev64':
-        train_data = BEVDataset(H.data_root, do_rand_rot=True)
-        valid_data = BEVDataset(H.data_root, reduced_subset_size=256)
+    elif H.dataset == 'bev64' or H.dataset == 'bev128' or H.dataset == 'bev256':
+        train_data = BEVDataset(H.data_root,
+                                do_rand_rot=H.rotate_samples,
+                                do_extrapolation=H.do_extrapolation,
+                                do_masking=H.do_masking)
+        valid_data = BEVDataset(H.data_root,
+                                reduced_subset_size=256,
+                                do_extrapolation=H.do_extrapolation,
+                                do_masking=H.do_masking)
         # Create a data matrix
         dataloader = DataLoader(valid_data, len(valid_data))
         vaX = next(iter(dataloader)).numpy()
         teX = vaX
-        H.image_size = 64
-        H.image_channels = 1
+        H.image_channels = 2
         shift = 0.
         scale = 1.
-    elif H.dataset == 'bev256':
-        train_data = BEVDataset(H.data_root, do_rand_rot=True)
-        valid_data = BEVDataset(H.data_root, reduced_subset_size=256)
-        # Create a data matrix
-        dataloader = DataLoader(valid_data, len(valid_data))
-        vaX = next(iter(dataloader)).numpy()
-        teX = vaX
-        H.image_size = 256
-        H.image_channels = 1
-        shift = 0.
-        scale = 1.
+        if H.dataset == 'bev64':
+            H.image_size = 64
+        elif H.dataset == 'bev128':
+            H.image_size = 128
+        elif H.dataset == 'bev256':
+            H.image_size = 256
     else:
         raise ValueError('unknown dataset: ', H.dataset)
 
@@ -85,11 +88,12 @@ def set_up_data(H):
     shift_loss = torch.tensor([shift_loss]).cuda().view(1, 1, 1, 1)
     scale_loss = torch.tensor([scale_loss]).cuda().view(1, 1, 1, 1)
 
-    if H.dataset == 'ffhq_1024':
+    d = H.dataset
+    if d == 'ffhq_1024':
         train_data = ImageFolder(trX, transforms.ToTensor())
         valid_data = ImageFolder(eval_dataset, transforms.ToTensor())
         untranspose = True
-    elif H.dataset == 'bev64' or H.dataset == 'bev256':
+    elif d == 'bev64' or d == 'bev128' or d == 'bev256':
         untranspose = False
     else:
         train_data = TensorDataset(torch.as_tensor(trX))
@@ -204,66 +208,74 @@ def cifar10(data_root, one_hot=True):
     return (trX, trY), (vaX, vaY), (teX, teY)  # (N, H, W, C), (N, 1)
 
 
-def read_compressed_pickle(path):
-    try:
-        with gzip.open(path, "rb") as f:
-            pkl_obj = f.read()
-            obj = pickle.loads(pkl_obj)
-            return obj
-    except IOError as error:
-        print(error)
-
-
-def bev(data_root, test_size=256):
-    '''
-    NOTE: Input data range is transformed (0, 255) --> (-1., +1.) during
-          preprocessing.
-    Returns:
-        trX: Training data matrix (N, H, W, C) of images (uint8) with value
-             range (0, 255).
-    '''
-    sample_paths = glob.glob(os.path.join(data_root, '*', '*.pkl.gz'))
-    random.shuffle(sample_paths)
-
-    samples = []
-
-    for sample_path in sample_paths:
-        sample = read_compressed_pickle(sample_path)
-        road_present = sample['road_present']  # (H, W)
-        road_future = sample['road_future']
-        # Convert (0., 1.) prob values --> (0, 255) image values
-        # road_present = np.round(road_present * 255).astype(np.uint8)
-        road_present = road_present.astype(np.float32)
-        road_future = road_future.astype(np.float32)
-
-        sample = np.stack([road_present, road_future], -1)
-        samples.append(sample)
-
-    samples = np.stack(samples)  # (N, H, W)
-
-    trX = samples[:-test_size]
-    vaX = samples[-test_size:]
-    teX = samples[-test_size:]
-
-    # (N, H, W, C)
-    return trX, vaX, teX
+# def bev(data_root, test_size=256):
+#     '''
+#     NOTE: Input data range is transformed (0, 255) --> (-1., +1.) during
+#           preprocessing.
+#     Returns:
+#         trX: Training data matrix (N, H, W, C) of images (uint8) with value
+#              range (0, 255).
+#     '''
+#     sample_paths = glob.glob(os.path.join(data_root, '*', '*.pkl.gz'))
+#     random.shuffle(sample_paths)
+#
+#     samples = []
+#
+#     for sample_path in sample_paths:
+#         sample = read_compressed_pickle(sample_path)
+#         road_present = sample['road_present']  # (H, W)
+#         road_future = sample['road_future']
+#         # Convert (0., 1.) prob values --> (0, 255) image values
+#         # road_present = np.round(road_present * 255).astype(np.uint8)
+#         road_present = road_present.astype(np.float32)
+#         road_future = road_future.astype(np.float32)
+#
+#         sample = np.stack([road_present, road_future], -1)
+#         samples.append(sample)
+#
+#     samples = np.stack(samples)  # (N, H, W)
+#
+#     trX = samples[:-test_size]
+#     vaX = samples[-test_size:]
+#     teX = samples[-test_size:]
+#
+#     # (N, H, W, C)
+#     return trX, vaX, teX
 
 
 class BEVDataset(Dataset):
 
-    def __init__(self, root_dir, do_rand_rot=False, reduced_subset_size=-1):
+    def __init__(
+        self,
+        root_dir,
+        do_rand_rot=False,
+        reduced_subset_size=-1,
+        do_extrapolation=False,
+        do_masking=False,
+        mask_p_min=0.95,
+        mask_p_max=0.99,
+    ):
         '''
         Args:
             root_dir: 
             do_rand_rot:
             reduced_subset_size: If positive integer ==> Sample size
+            do_extrapolation: Extrapolate beyond observed region by assigning
+                              unobserved elements to their nearest neighbor.
+            mask_p_min: Probability range for extrapolation masking operation.
+            mask_p_max:
+
         '''
         self.sample_paths = glob.glob(os.path.join(root_dir, '*', '*.pkl.gz'))
         if reduced_subset_size > 0:
-            random.shuffle(self.sample_paths)
+            # random.shuffle(self.sample_paths)
             self.sample_paths = self.sample_paths[:reduced_subset_size]
 
         self.do_rand_rot = do_rand_rot
+        self.do_extrapolation = do_extrapolation
+        self.do_masking = do_masking
+        self.mask_p_min = mask_p_min
+        self.mask_p_max = mask_p_max
 
     def __len__(self):
         return len(self.sample_paths)
@@ -275,13 +287,31 @@ class BEVDataset(Dataset):
         '''
         sample_path = self.sample_paths[idx]
 
-        sample = read_compressed_pickle(sample_path)
+        sample = self.read_compressed_pickle(sample_path)
         road_present = sample['road_present']  # (H, W)
         road_future = sample['road_future']
+        road_full = sample['road_full']
         road_present = road_present.astype(np.float32)
         road_future = road_future.astype(np.float32)
+        road_full = road_full.astype(np.float32)
 
-        sample = np.stack([road_present, road_future], -1)
+        if self.do_extrapolation:
+            pseudo_road_full, _, _ = self.gen_pseudo_bev(road_full)
+
+            if self.do_masking:
+                p = np.random.random()
+                mask_prob = self.mask_p_max - (1. - self.mask_p_min) * p
+                h, w = pseudo_road_full.shape
+                mask = np.random.rand(h, w) < mask_prob
+                pseudo_road_full[mask] = 0.5
+
+            mask = ~(pseudo_road_full == 0.5)
+            pseudo_road_full[mask] = pseudo_road_full[mask]
+
+            mask = road_full == 0.5
+            road_full[mask] = pseudo_road_full[mask]
+
+        sample = np.stack([road_present, road_future, road_full], -1)
 
         sample = torch.tensor(sample)
 
@@ -291,24 +321,103 @@ class BEVDataset(Dataset):
 
         return sample
 
+    @staticmethod
+    def read_compressed_pickle(path):
+        try:
+            with gzip.open(path, "rb") as f:
+                pkl_obj = f.read()
+                obj = pickle.loads(pkl_obj)
+                return obj
+        except IOError as error:
+            print(error)
+
+    @staticmethod
+    def distance_field(mat: np.array,
+                       dist_from_pos: bool,
+                       metric: str = 'chebyshev'):
+        '''
+        Assumes mat has a single semantic class with probablistic measurements
+        p(x_{i,j}=True).
+        '''
+        if dist_from_pos:
+            input = mat > 0.5
+        else:
+            input = mat < 0.5
+        not_input = ~input
+
+        input_inner = ndimage.binary_erosion(input)
+        contour = input - input_inner.astype(int)
+
+        dist_field = contour.astype(int)
+
+        dist_field[not_input] = distance.cdist(
+            np.argwhere(contour), np.argwhere(not_input), metric).min(0) + 1
+
+        return dist_field
+
+    def gen_pseudo_bev(self, bev, metric: str = 'sqeuclidean'):
+
+        pos_dist_field = self.distance_field(bev, True, metric)
+        neg_dist_field = self.distance_field(bev, False, metric)
+
+        pseudo_bev = copy.deepcopy(bev)
+
+        for i in range(128):
+            for j in range(128):
+
+                obs = bev[i, j]
+                if obs > 0.5 or obs < 0.5:
+                    continue
+
+                pos_dist = pos_dist_field[i, j]
+                neg_dist = neg_dist_field[i, j]
+
+                if pos_dist < neg_dist:
+                    pseudo_obs = 1.
+                else:
+                    pseudo_obs = 0.
+                pseudo_bev[i, j] = pseudo_obs
+
+        return pseudo_bev, pos_dist_field, neg_dist_field
+
 
 if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
     from torch.utils.data import DataLoader
 
-    dataset = BEVDataset('./bevs_64px/', True, 100)
+    do_rand_rot = False
+    dataset = BEVDataset(
+        '/home/robin/projects/pc-accumulation-lib/bevs_128px_aug',
+        do_rand_rot,
+        100,
+        do_extrapolation=True,
+        do_masking=True,
+    )
     print(len(dataset))
 
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+    batch_size = 4
+
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for idx, sample in enumerate(dataloader):
 
-        print(idx, sample.shape)
-        for batch_idx in range(4):
-            plt.subplot(1, 4, batch_idx + 1)
-            plt.imshow(sample[batch_idx, :, :, 0])
-        plt.savefig(f'dataset_viz_{idx}.png')
+        road_present = sample[:, :, :, 0:1]
+        road_future = sample[:, :, :, 1:2]
+        road_full = sample[:, :, :, 2:3]
 
-        if idx == 2:
-            break
+        batch_idx = 0
+
+        print(idx, sample.shape)
+        for batch_idx in range(batch_size):
+            plt.subplot(3, batch_size, 0 * batch_size + batch_idx + 1)
+            plt.imshow(road_present[batch_idx].numpy())
+            plt.subplot(3, batch_size, 1 * batch_size + batch_idx + 1)
+            plt.imshow(road_future[batch_idx].numpy())
+            plt.subplot(3, batch_size, 2 * batch_size + batch_idx + 1)
+            plt.imshow(road_full[batch_idx].numpy())
+
+        plt.show()
+        # plt.savefig(f'dataset_viz_{idx}.png')
+
+        break

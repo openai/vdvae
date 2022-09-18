@@ -98,7 +98,18 @@ def binary_cross_entropy(x_hat, x, obs_mask=None, eps=1e-12):
     if obs_mask is not None:
         log_pxz = obs_mask * log_pxz
 
-    return log_pxz.sum(dim=(1, 2, 3))
+    # Mean over all observed elements
+    return log_pxz.sum(dim=(1, 2, 3)) / obs_mask.sum(dim=(1, 2, 3))
+
+
+def mse(x_hat, x, obs_mask=None):
+    mse = (x_hat - x)**2
+
+    if obs_mask is not None:
+        mse = obs_mask * mse
+
+    # Mean over all observed elements
+    return mse.sum(dim=(1, 2, 3)) / obs_mask.sum(dim=(1, 2, 3))
 
 
 def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
@@ -255,6 +266,7 @@ class DmolNet(nn.Module):
         self.H = H
         self.width = H.width
         self.ch = H.image_channels
+        self.rec_objective = H.rec_objective
         # num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
         self.out_conv = get_conv(
             H.width,
@@ -265,8 +277,14 @@ class DmolNet(nn.Module):
 
     def nll(self, px_z, x, mask):
         x_hat = self.forward(px_z)
-        mask = mask.unsqueeze(-1)
-        recon_loss = -1. * binary_cross_entropy(x_hat, x, mask)
+        if self.rec_objective == 'ce':
+            recon_loss = -1. * binary_cross_entropy(x_hat, x, mask)
+        elif self.rec_objective == 'mse':
+            recon_loss = mse(x_hat, x, mask)
+        else:
+            raise Exception(
+                f'Undefined reconstruction objective ({self.rec_objective})')
+
         return recon_loss
         # return discretized_mix_logistic_loss(x=x,
         #                                      l=self.forward(px_z),

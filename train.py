@@ -2,6 +2,7 @@ import os
 import time
 
 import imageio
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
@@ -10,52 +11,78 @@ from torch.utils.data.distributed import DistributedSampler
 from data import set_up_data
 from train_helpers import (accumulate_stats, load_opt, load_vaes, save_model,
                            set_up_hyperparams, update_ema)
-from utils import get_cpu_stats_over_ranks
+from utils import arrange_side_by_side, get_cpu_stats_over_ranks, image_grid
 
 
 def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
+    '''
+    Args:
+        data_input: (B,H,W,C)
+    '''
     t0 = time.time()
 
     vae.zero_grad()
 
-    B = data_input.shape[0]
-    device = data_input.get_device()
+    # B = data_input.shape[0]
+    # device = data_input.get_device()
 
     x_1_prob = data_input[:, :, :, 0:1]  # Extract 'road_present' tensors
-    # x_2_prob = data_input[:, :, :, 1:2]  # Extract 'road_future' tensors
+    x_2_prob = data_input[:, :, :, 1:2]  # Extract 'road_future' tensors
+    x_3_prob = data_input[:, :, :, 2:3]  # Extract 'road_full' tensors
 
     # Value range (0, 1) --> (-1, +1)
     x_1 = 2 * x_1_prob - 1
-    # x_2 = 2 * x_2_prob - 1
+    x_2 = 2 * x_2_prob - 1
+    x_3 = 2 * x_3_prob - 1
 
-    # x_1_target = x_1.detach().clone()
+    # x_2_rot = torch.rot90(x_2, 2, [1, 2])
+    # x_3_rot = torch.rot90(x_3, 2, [1, 2])
+    # x_3_prob_rot = torch.rot90(x_3_prob, 2, [1, 2])
 
-    # Observable mask
-    mask_1s = torch.logical_or(x_1 < 0., x_1 > 0.).to(device)
-    # mask_2s = torch.logical_or(x_2 < 0., x_2 > 0.).to(device)
-    mask_1s = mask_1s[:, :, :, 0]  # (B, H, W)
-    # mask_2s = mask_2s[:, :, :, 0]
+    # x = torch.concat((x_1, x_2_rot, x_3, x_3_rot))
+    # x_prob = torch.concat((x_3_prob, x_3_prob_rot, x_3_prob, x_3_prob_rot))
+    x = torch.concat((x_1, x_2, x_3))
+    x_prob = torch.concat((x_3_prob, x_3_prob, x_3_prob))
 
-    # Past + Future sample
-    # x_2_full = x_1.detach().clone()
-    # x_2_full[mask_2s] = 0
-    # x_2_full += x_2
-    # x_2 = x_2_full
-    # mask_2s = torch.logical_or(mask_1s, mask_2s)
+    # Target value thresholding
+    POS_THRESH = 0.75
+    NEG_THRESH = 0.25
 
-    # x_cat = torch.concat((x_1, x_2), dim=0)
-    # x_prob_cat = torch.concat((x_1_prob, x_2_prob), dim=0)
-    # mask_cat = torch.concat((mask_1s, mask_2s), dim=0)
+    x_prob[x_prob > POS_THRESH] = 1.
+    x_prob[x_prob < NEG_THRESH] = 0.
 
-    if H.rnd_noise_ratio > 0.:
-        B, h, w, c = x_1.shape
-        mask_prob = H.rnd_noise_ratio * torch.rand(1,
-                                                   device=torch.device(device))
-        mask = torch.rand(
-            (B, h, w, c), device=torch.device(device)) < mask_prob
-        x_1[mask] = 0
+    # if H.fully_observable:
+    #     x = torch.concat((x_3, x_3_rot, x_3, x_3_rot))
+    #     x_prob = torch.concat((x_3_prob, x_3_prob_rot))
+    #     m_pred = torch.ones_like(x_prob, dtype=torch.bool)
+    #     m_in = m_pred
+    # elif H.fully_observable_pred:
+    #     x = torch.concat((x_1, x_2_rot, x_3, x_3_rot))
+    #     x_prob = torch.concat((x_3_prob, x_3_prob_rot))
+    #     m_pred = torch.ones_like(x_prob, dtype=torch.bool)
+    #     m_in = m_pred
+    # else:
+    m_pred = ~(x_prob == 0.5)
+    m_pred[(x_prob < POS_THRESH) & (x_prob > NEG_THRESH)] = False
 
-    stats = vae.forward(x_1, x_1_prob, mask_1s)
+    # if H.rnd_noise_ratio > 0.:
+    #     B, h, w, c = x.shape
+    #     # Do not mask the oracle
+    #     B = B // 2
+    #     mask_prob = H.rnd_noise_ratio * torch.rand(1, device=device)
+    #     mask = torch.rand((B, h, w, c), device=device) < mask_prob
+    #     dummy_mask = torch.zeros_like(mask, dtype=torch.bool, device=device)
+    #     mask = torch.concat((mask, dummy_mask))
+    #     x[mask] = 0
+
+    # Add input observability mask
+    m_in = ~(x == 0)
+    x = torch.cat((x, m_in), dim=-1)
+
+    # x:      (B,H,W,2) <-- Contains normal + rotated 'x_3' for z'
+    # x_prob: (B,H,W,1)
+    # m:      (B,H,W,1)
+    stats = vae.forward(x, x_prob, m_pred, train_mode=True)
 
     stats['elbo'].backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(),
@@ -84,14 +111,41 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
 def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
-        device = data_input.get_device()
+        # device = data_input.get_device()
+
         x_1_prob = data_input[:, :, :, 0:1]  # Extract 'road_present' tensors
+        x_2_prob = data_input[:, :, :, 1:2]  # Extract 'road_future' tensors
+        x_3_prob = data_input[:, :, :, 2:3]  # Extract 'road_full' tensors
+
         # Value range (0, 1) --> (-1, +1)
         x_1 = 2 * x_1_prob - 1
-        # Observable mask
-        mask_1s = torch.logical_or(x_1 < 0., x_1 > 0.).to(device)
-        mask_1s = mask_1s[:, :, :, 0]  # (B, H, W)
-        stats = ema_vae.forward(x_1, x_1, mask_1s)
+        x_2 = 2 * x_2_prob - 1
+        # x_3 = 2 * x_3_prob - 1
+
+        # x_2_rot = torch.rot90(x_2, 2, [1, 2])
+        # x_3_prob_rot = torch.rot90(x_3_prob, 2, [1, 2])
+
+        x = torch.concat((x_1, x_2))
+        x_prob = torch.concat((x_3_prob, x_3_prob))
+
+        # x = x_3
+        # x_prob = x_3_prob
+
+        # Target value thresholding
+        POS_THRESH = 0.75
+        NEG_THRESH = 0.25
+
+        x_prob[x_prob > POS_THRESH] = 1.
+        x_prob[x_prob < NEG_THRESH] = 0.
+        m_pred = ~(x_prob == 0.5)
+        m_pred[(x_prob < POS_THRESH) & (x_prob > NEG_THRESH)] = False
+
+        # Add input observability mask
+        m_in = ~(x == 0)
+        x = torch.cat((x, m_in), dim=-1)
+
+        stats = ema_vae.forward(x, x_prob, m_pred)
+
     stats = get_cpu_stats_over_ranks(stats)
     return stats
 
@@ -110,8 +164,9 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
     # TODO Centralize the (0, 1) --> (-1, 1) transformation in the preprocessor
     preprocessed = 2 * preprocessed - 1
     # Remove 'future' sample
-    orig_image = orig_image[:, :, :, 0:1]
-    preprocessed = preprocessed[:, :, :, 0:1]
+    # orig_image = orig_image[:, :, :, 0:1]
+    # preprocessed = preprocessed[:, :, :, 0:1]
+
     return orig_image, preprocessed
 
 
@@ -126,8 +181,8 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
 
     # Remove 'future' sample
-    viz_batch_original = viz_batch_original[:, :, :, 0:1]
-    viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
+    # viz_batch_original = viz_batch_original[:, :, :, 0:1]
+    # viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
 
     early_evals = set([1] + [2**exp for exp in range(3, 14)])
     stats = []
@@ -156,9 +211,34 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
             if iterate % H.iters_per_images == 0 or (
                     iters_since_starting in early_evals
                     and H.dataset != 'ffhq_1024') and H.rank == 0:
-                write_images(H, ema_vae, viz_batch_original,
-                             viz_batch_processed,
-                             f'{H.save_dir}/samples-{iterate}.png', logprint)
+
+                # Visualize both 'partial' and 'oracle' samples
+                # POINT: 'Oracle' samples used to get 'z' during training
+                #        ==> Compare how 'partial' does on its own
+                B = viz_batch_original.shape[-1] // 3
+                viz_batch_original_obs = viz_batch_original[:, :, :, :B]
+                viz_batch_original_oracle = viz_batch_original[:, :, :, 2 * B:]
+                viz_batch_processed_obs = viz_batch_processed[:, :, :, :B]
+                viz_batch_processed_oracle = viz_batch_processed[:, :, :,
+                                                                 2 * B:]
+
+                m = torch.ones_like(viz_batch_processed_obs)
+                viz_batch_processed_obs = torch.cat(
+                    (viz_batch_processed_obs, m), dim=-1)
+                m = torch.ones_like(viz_batch_processed_oracle)
+                viz_batch_processed_oracle = torch.cat(
+                    (viz_batch_processed_oracle, m), dim=-1)
+
+                for temp in [0.1, 0.4, 1.0]:
+                    write_images(H,
+                                 ema_vae,
+                                 viz_batch_original_obs,
+                                 viz_batch_processed_obs,
+                                 viz_batch_original_oracle,
+                                 viz_batch_processed_oracle,
+                                 f'{H.save_dir}/samples-{iterate}_t{temp}.png',
+                                 logprint,
+                                 temp=temp)
 
             iterate += 1
             iters_since_starting += 1
@@ -215,27 +295,59 @@ def evaluate(H, ema_vae, data_valid, preprocess_fn):
     return stats
 
 
-def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
-                 logprint):
+def write_images(H,
+                 ema_vae,
+                 viz_batch_original,
+                 viz_batch_processed,
+                 viz_batch_original_oracle,
+                 viz_batch_processed_oracle,
+                 fname,
+                 logprint,
+                 temp=0.1):
     '''
     Args:
         viz_batch_original: RGB (np.uint8) tensor (B,H,W,C).
         viz_batch_processed: Float tensor (B,H,W,C) in the (-1, 1) interval.
     '''
+    ###########
+    #  Input
+    ###########
     zs = [
         s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed)
     ]
-    batches = [viz_batch_original.numpy()]
-    mb = viz_batch_processed.shape[0]
+    zs_oracle = [
+        s['z'].cuda()
+        for s in ema_vae.forward_get_latents(viz_batch_processed_oracle)
+    ]
+    # Input viz
+    obs_viz = viz_batch_original.numpy()
+    oracle_viz = viz_batch_original_oracle.numpy()
+    input_viz = arrange_side_by_side(obs_viz, oracle_viz)
+    batches = [input_viz]
+
+    mb = input_viz.shape[0]
     lv_points = np.floor(
         np.linspace(0, 1, H.num_variables_visualize + 2) *
         len(zs)).astype(int)[1:-1]
+    # Latent sampling viz
     for i in lv_points:
-        batches.append(ema_vae.forward_samples_set_latents(mb, zs[:i], t=0.1))
-    for t in [1.0, 0.9, 0.8, 0.7][:H.num_temperatures_visualize]:
+        latent_obs = ema_vae.forward_samples_set_latents(mb // 2,
+                                                         zs[:i],
+                                                         t=temp)
+        latent_oracle = ema_vae.forward_samples_set_latents(mb // 2,
+                                                            zs_oracle[:i],
+                                                            t=temp)
+        latent_viz = arrange_side_by_side(latent_obs, latent_oracle)
+        batches.append(latent_viz)
+
+    # Unconditional viz
+    viz_temps_list = H.viz_temps
+    for t in viz_temps_list[:H.num_temperatures_visualize]:
         batches.append(ema_vae.forward_uncond_samples(mb, t=t))
     n_rows = len(batches)
-    ch = batches[0].shape[-1]
+    ch = latent_obs[0].shape[-1]
+    # Remove observation mask input layer
+    viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
     im = np.concatenate(batches, axis=0).reshape(
         (n_rows, mb,
          *viz_batch_processed.shape[1:])).transpose([0, 2, 1, 3, 4]).reshape([
@@ -243,6 +355,16 @@ def write_images(H, ema_vae, viz_batch_original, viz_batch_processed, fname,
              mb * viz_batch_processed.shape[2], ch
          ])
     logprint(f'printing samples to {fname}')
+
+    cm = plt.get_cmap('viridis')
+    im = cm(im)
+    im = im[:, :, 0]  # (W,H,C)
+
+    im = (255 * im).astype(np.uint8)
+
+    _, grid_h, grid_w, _ = viz_batch_processed.shape
+    im = image_grid(im, grid_h, grid_w)
+
     imageio.imwrite(fname, im)
 
 
@@ -250,8 +372,27 @@ def run_test_eval(H, ema_vae, data_test, preprocess_fn, logprint):
     print('evaluating')
     viz_batch_original, viz_batch_processed = get_sample_for_visualization(
         data_test, preprocess_fn, H.num_images_visualize, H.dataset)
-    write_images(H, ema_vae, viz_batch_original, viz_batch_processed,
-                 f'{H.save_dir}/samples-eval.png', logprint)
+
+    # Visualize both 'partial' and 'oracle' samples
+    # POINT: 'Oracle' samples used to get 'z' during training
+    #        ==> Compare how 'partial' does on its own
+    B = viz_batch_processed.shape[0] // 2
+    viz_batch_original_oracle = viz_batch_original[B:]
+    viz_batch_processed_oracle = viz_batch_processed[B:]
+    viz_batch_processed_obs = viz_batch_processed[:B]
+    viz_batch_original_obs = viz_batch_original[:B]
+
+    for temp in [0.1, 0.4, 1.0]:
+        write_images(H,
+                     ema_vae,
+                     viz_batch_original_obs,
+                     viz_batch_processed_obs,
+                     viz_batch_original_oracle,
+                     viz_batch_processed_oracle,
+                     f'{H.save_dir}/samples-eval_t{temp}.png',
+                     logprint,
+                     temp=temp)
+
     stats = evaluate(H, ema_vae, data_test, preprocess_fn)
     print('test results')
     for k in stats:

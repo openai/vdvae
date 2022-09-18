@@ -148,7 +148,7 @@ class DecBlock(nn.Module):
         self.resnet.c4.weight.data *= np.sqrt(1 / n_blocks)
         self.z_fn = lambda x: self.z_proj(x)
 
-    def sample(self, x, acts):
+    def sample(self, x, acts, train_mode=False):
         qm, qv = self.enc(torch.cat([x, acts], dim=1)).chunk(2, dim=1)
         feats = self.prior(x)
         pm, pv, xpp = feats[:, :self.zdim,
@@ -156,8 +156,32 @@ class DecBlock(nn.Module):
                                         ...], feats[:, self.zdim * 2:, ...]
         x = x + xpp
         z = draw_gaussian_diag_samples(qm, qv)
-        kl = gaussian_analytical_kl(qm, pm, qv, pv)
-        return z, x, kl
+
+        # Unpack 'partial' and 'oracle' sets
+        if train_mode:
+            B = qm.shape[0] // 3
+            qm_1 = qm[0:B]
+            qv_1 = qv[0:B]
+            qm_2 = qm[B:2 * B]
+            qv_2 = qv[B:2 * B]
+            qm_oracle = qm[2 * B:]
+            qv_oracle = qv[2 * B:]
+
+            # Match oracle (same order as Denton)
+            # Order: ( p(x) || q(x) ) ==> Optimize 'partial' to cover 'oracle'
+            kl_oracle_1 = gaussian_analytical_kl(qm_oracle, qm_1, qv_oracle,
+                                                 qv_1)
+            kl_oracle_2 = gaussian_analytical_kl(qm_oracle, qm_2, qv_oracle,
+                                                 qv_2)
+            kl_oracle = torch.concat((kl_oracle_1, kl_oracle_2))
+
+        else:
+            kl_oracle = torch.zeros_like(qm)
+
+        # Match prior (same order as Vanilla VDVAE)
+        # Order: p(x) || q(x) ==> Optimize 'prior' to cover all 'posteriors'
+        kl_prior = gaussian_analytical_kl(qm, pm, qv, pv)
+        return z, x, kl_prior, kl_oracle
 
     def sample_uncond(self, x, t=None, lvs=None):
         n, c, h, w = x.shape
@@ -184,18 +208,18 @@ class DecBlock(nn.Module):
             x = x.repeat(acts.shape[0], 1, 1, 1)
         return x, acts
 
-    def forward(self, xs, activations, get_latents=False):
+    def forward(self, xs, activations, get_latents=False, train_mode=False):
         x, acts = self.get_inputs(xs, activations)
         if self.mixin is not None:
             x = x + F.interpolate(xs[self.mixin][:, :x.shape[1], ...],
                                   scale_factor=self.base // self.mixin)
-        z, x, kl = self.sample(x, acts)
+        z, x, kl_prior, kl_oracle = self.sample(x, acts, train_mode)
         x = x + self.z_fn(z)
         x = self.resnet(x)
         xs[self.base] = x
         if get_latents:
-            return xs, dict(z=z.detach(), kl=kl)
-        return xs, dict(kl=kl)
+            return xs, dict(z=z.detach(), kl=kl_prior, kl_oracle=kl_oracle)
+        return xs, dict(kl=kl_prior, kl_oracle=kl_oracle)
 
     def forward_uncond(self, xs, t=None, lvs=None):
         try:
@@ -238,11 +262,14 @@ class Decoder(HModule):
         self.bias = nn.Parameter(torch.zeros(1, H.width, 1, 1))
         self.final_fn = lambda x: x * self.gain + self.bias
 
-    def forward(self, activations, get_latents=False):
+    def forward(self, activations, get_latents=False, train_mode=False):
         stats = []
         xs = {a.shape[2]: a for a in self.bias_xs}
         for block in self.dec_blocks:
-            xs, block_stats = block(xs, activations, get_latents=get_latents)
+            xs, block_stats = block(xs,
+                                    activations,
+                                    get_latents=get_latents,
+                                    train_mode=train_mode)
             stats.append(block_stats)
         xs[self.H.image_size] = self.final_fn(xs[self.H.image_size])
         return xs[self.H.image_size], stats
@@ -276,18 +303,18 @@ class VAE(HModule):
         self.encoder = Encoder(self.H)
         self.decoder = Decoder(self.H)
 
-    def forward(self, x, x_target, mask=None):
+    def forward(self, x, x_target, mask=None, train_mode=False):
         '''
         Args:
             x: Interval (-1, 1)
             x_target: Interval (-1, 1)
         '''
-        
+
         device = x_target.get_device()
-        
+
         activations = self.encoder.forward(x)
-        px_z, stats = self.decoder.forward(activations)
-        
+        px_z, stats = self.decoder.forward(activations, train_mode=train_mode)
+
         # Masked ELBO computation
         if mask is None:
             B, H, W, _ = x_target.shape
@@ -296,14 +323,21 @@ class VAE(HModule):
         distortion_per_pixel = self.decoder.out_net.nll(px_z, x_target, mask)
 
         rate_per_pixel = torch.zeros_like(distortion_per_pixel)
+        rate_per_pixel_oracle = torch.zeros(stats[0]['kl_oracle'].shape[0],
+                                            device=device)
         ndims = np.prod(x.shape[1:])
         for statdict in stats:
             rate_per_pixel += statdict['kl'].sum(dim=(1, 2, 3))
+            rate_per_pixel_oracle += statdict['kl_oracle'].sum(dim=(1, 2, 3))
         rate_per_pixel /= ndims
-        elbo = (distortion_per_pixel + rate_per_pixel).mean()
+        rate_per_pixel_oracle /= ndims
+
+        elbo = (distortion_per_pixel +
+                rate_per_pixel).mean() + rate_per_pixel_oracle.mean()
         return dict(elbo=elbo,
                     distortion=distortion_per_pixel.mean(),
-                    rate=rate_per_pixel.mean())
+                    rate=rate_per_pixel.mean(),
+                    rate_oracle=rate_per_pixel_oracle.mean())
 
     def forward_get_latents(self, x):
         activations = self.encoder.forward(x)

@@ -16,13 +16,17 @@ def allreduce(x, average):
         dist.all_reduce(x, dist.ReduceOp.SUM)
     return x / mpi_size() if average else x
 
+
 def get_cpu_stats_over_ranks(stat_dict):
     keys = sorted(stat_dict.keys())
-    allreduced = allreduce(torch.stack([torch.as_tensor(stat_dict[k]).detach().cuda().float() for k in keys]), average=True).cpu()
+    allreduced = allreduce(torch.stack(
+        [torch.as_tensor(stat_dict[k]).detach().cuda().float() for k in keys]),
+                           average=True).cpu()
     return {k: allreduced[i].item() for (i, k) in enumerate(keys)}
 
 
 class Hyperparams(dict):
+
     def __getattr__(self, attr):
         try:
             return self[attr]
@@ -100,9 +104,9 @@ def maybe_download(path, filename=None):
 
 def tile_images(images, d1=4, d2=4, border=1):
     id1, id2, c = images[0].shape
-    out = np.ones([d1 * id1 + border * (d1 + 1),
-                   d2 * id2 + border * (d2 + 1),
-                   c], dtype=np.uint8)
+    out = np.ones(
+        [d1 * id1 + border * (d1 + 1), d2 * id2 + border * (d2 + 1), c],
+        dtype=np.uint8)
     out *= 255
     if len(images) != d1 * d2:
         raise ValueError('Wrong num of images')
@@ -113,6 +117,37 @@ def tile_images(images, d1=4, d2=4, border=1):
         start_d2 = num_d2 * id2 + border * (num_d2 + 1)
         out[start_d1:start_d1 + id1, start_d2:start_d2 + id2, :] = im
     return out
+
+
+def image_grid(img, grid_h, grid_w, color=(255, 255, 255)):
+
+    img_h, img_w, _ = img.shape
+
+    for idx_h in range(1, img_h // grid_h):
+        for idx_w in range(1, img_w // grid_w):
+            border_h = idx_h * grid_h
+            border_w = idx_w * grid_w
+            img[border_h, :, :3] = color
+            if idx_w % 2 == 0:
+                margin = 1
+            else:
+                margin = 0
+            img[:, border_w - margin:border_w + margin + 1, :3] = color
+
+    return img
+
+
+def arrange_side_by_side(array_a, array_b):
+    a = []
+    num_arrays = array_a.shape[0]
+    for idx in range(num_arrays):
+        elem_a = array_a[idx]
+        elem_b = array_b[idx]
+        a.append(elem_a)
+        a.append(elem_b)
+    a = np.stack(a)
+
+    return a
 
 
 def mpi_size():
