@@ -303,6 +303,8 @@ class VAE(HModule):
         self.encoder = Encoder(self.H)
         self.decoder = Decoder(self.H)
 
+        self.w_kl_oracle = self.H.w_kl_oracle
+
     def forward(self, x, x_target, mask=None, train_mode=False):
         '''
         Args:
@@ -331,6 +333,8 @@ class VAE(HModule):
             rate_per_pixel_oracle += statdict['kl_oracle'].sum(dim=(1, 2, 3))
         rate_per_pixel /= ndims
         rate_per_pixel_oracle /= ndims
+
+        rate_per_pixel_oracle = self.w_kl_oracle * rate_per_pixel_oracle
 
         elbo = (distortion_per_pixel +
                 rate_per_pixel).mean() + rate_per_pixel_oracle.mean()
