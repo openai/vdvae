@@ -100,7 +100,7 @@ HPARAMS_REGISTRY['bev64'] = bev64
 
 bev128 = Hyperparams()
 bev128.update(i32)
-bev128.n_batch = 4 * 4  # def. BS * additional BS
+bev128.n_batch = 2  # 4 * 4  # def. BS * additional BS
 bev128.width = 64  # Default width (match largest custom_width?)
 bev128.lr = 0.00015  # * (4 / 32) * 4 * 2  # num_nodes * additional BS
 bev128.grad_clip = 175.0
@@ -162,6 +162,7 @@ def add_vae_arguments(parser):
     parser.add_argument('--restore_log_path', type=str, default=None)
     parser.add_argument('--restore_optimizer_path', type=str, default=None)
     parser.add_argument('--dataset', type=str, default='cifar10')
+    parser.add_argument('--dataloader_workers', type=int, default=0)
 
     parser.add_argument('--ema_rate', type=float, default=0.999)
 

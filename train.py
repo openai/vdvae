@@ -194,6 +194,7 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                             batch_size=H.n_batch,
                             drop_last=True,
                             pin_memory=True,
+                            num_workers=H.dataloader_workers,
                             sampler=train_sampler):
             data_input, target = preprocess_fn(x)
             training_stats = training_step(H, data_input, target, vae, ema_vae,
