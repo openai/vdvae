@@ -41,8 +41,10 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
     # x = torch.concat((x_1, x_2_rot, x_3, x_3_rot))
     # x_prob = torch.concat((x_3_prob, x_3_prob_rot, x_3_prob, x_3_prob_rot))
-    x = torch.concat((x_1, x_2, x_3))
-    x_prob = torch.concat((x_3_prob, x_3_prob, x_3_prob))
+    x_post_match = torch.concat((x_1, x_2))
+    x_oracle = torch.concat((x_3, x_3))
+
+    x_prob = torch.concat((x_3_prob, x_3_prob))
 
     # Target value thresholding
     POS_THRESH = 0.75
@@ -76,13 +78,14 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     #     x[mask] = 0
 
     # Add input observability mask
-    m_in = ~(x == 0)
-    x = torch.cat((x, m_in), dim=-1)
+    m_in = ~(x_post_match == 0)
+    x_post_match = torch.cat((x_post_match, m_in), dim=-1)
 
-    # x:      (B,H,W,2) <-- Contains normal + rotated 'x_3' for z'
-    # x_prob: (B,H,W,1)
-    # m:      (B,H,W,1)
-    stats = vae.forward(x, x_prob, m_pred, train_mode=True)
+    # x_oracle:     (2B,H,W,1) <-- Duplicates of B samples
+    # x_post_match: (2B,H,W,2)
+    # x_prob:       (2B,H,W,1)
+    # m_pred:       (2B,H,W,1)
+    stats = vae.forward(x_oracle, x_post_match, x_prob, m_pred)
 
     stats['elbo'].backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(),
@@ -120,12 +123,14 @@ def eval_step(data_input, target, ema_vae):
         # Value range (0, 1) --> (-1, +1)
         x_1 = 2 * x_1_prob - 1
         x_2 = 2 * x_2_prob - 1
-        # x_3 = 2 * x_3_prob - 1
+        x_3 = 2 * x_3_prob - 1
 
         # x_2_rot = torch.rot90(x_2, 2, [1, 2])
         # x_3_prob_rot = torch.rot90(x_3_prob, 2, [1, 2])
 
-        x = torch.concat((x_1, x_2))
+        x_post_match = torch.concat((x_1, x_2))
+        x_oracle = torch.concat((x_3, x_3))
+
         x_prob = torch.concat((x_3_prob, x_3_prob))
 
         # x = x_3
@@ -141,10 +146,10 @@ def eval_step(data_input, target, ema_vae):
         m_pred[(x_prob < POS_THRESH) & (x_prob > NEG_THRESH)] = False
 
         # Add input observability mask
-        m_in = ~(x == 0)
-        x = torch.cat((x, m_in), dim=-1)
+        m_in = ~(x_post_match == 0)
+        x_post_match = torch.cat((x_post_match, m_in), dim=-1)
 
-        stats = ema_vae.forward(x, x_prob, m_pred)
+        stats = ema_vae.forward(x_oracle, x_post_match, x_prob, m_pred)
 
     stats = get_cpu_stats_over_ranks(stats)
     return stats
@@ -223,12 +228,12 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                 viz_batch_processed_oracle = viz_batch_processed[:, :, :,
                                                                  2 * B:]
 
-                m = torch.ones_like(viz_batch_processed_obs)
+                m_in = ~(viz_batch_processed_obs == 0)
                 viz_batch_processed_obs = torch.cat(
-                    (viz_batch_processed_obs, m), dim=-1)
-                m = torch.ones_like(viz_batch_processed_oracle)
-                viz_batch_processed_oracle = torch.cat(
-                    (viz_batch_processed_oracle, m), dim=-1)
+                    (viz_batch_processed_obs, m_in), dim=-1)
+                # m = torch.ones_like(viz_batch_processed_oracle)
+                # viz_batch_processed_oracle = torch.cat(
+                #     (viz_batch_processed_oracle, m), dim=-1)
 
                 for temp in [0.1, 0.4, 1.0]:
                     write_images(H,
@@ -314,11 +319,13 @@ def write_images(H,
     #  Input
     ###########
     zs = [
-        s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed)
+        s['z'].cuda() for s in ema_vae.forward_get_latents(viz_batch_processed,
+                                                           mode='post_match')
     ]
     zs_oracle = [
         s['z'].cuda()
-        for s in ema_vae.forward_get_latents(viz_batch_processed_oracle)
+        for s in ema_vae.forward_get_latents(viz_batch_processed_oracle,
+                                             mode='oracle')
     ]
     # Input viz
     obs_viz = viz_batch_original.numpy()
@@ -332,12 +339,16 @@ def write_images(H,
         len(zs)).astype(int)[1:-1]
     # Latent sampling viz
     for i in lv_points:
-        latent_obs = ema_vae.forward_samples_set_latents(mb // 2,
-                                                         zs[:i],
-                                                         t=temp)
-        latent_oracle = ema_vae.forward_samples_set_latents(mb // 2,
-                                                            zs_oracle[:i],
-                                                            t=temp)
+        latent_obs = ema_vae.forward_samples_set_latents(
+            mb // 2,
+            zs[:i],
+            t=temp,
+        )
+        latent_oracle = ema_vae.forward_samples_set_latents(
+            mb // 2,
+            zs_oracle[:i],
+            t=temp,
+        )
         latent_viz = arrange_side_by_side(latent_obs, latent_oracle)
         batches.append(latent_viz)
 

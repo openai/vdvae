@@ -63,7 +63,8 @@ def set_up_data(H):
         dataloader = DataLoader(valid_data, len(valid_data))
         vaX = next(iter(dataloader)).numpy()
         teX = vaX
-        H.image_channels = 2
+        H.image_channels = 1
+        H.image_channels_post_match = 2
         shift = 0.
         scale = 1.
         if H.dataset == 'bev64':
