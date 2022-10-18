@@ -117,11 +117,12 @@ HPARAMS_REGISTRY['bev128'] = bev128
 
 bev256 = Hyperparams()
 bev256.update(bev64)
-bev256.n_batch = 4 * 3  # def. BS * additional BS
-bev256.width = 128  # Default width (match largest custom_width?)
+bev256.n_batch = 2  # * 3  # def. BS * additional BS
+bev256.width = 64  # Default width (match largest custom_width?)
 bev256.lr = 0.00015 * (4 / 32) * 4 * 1  # num_nodes * additional BS
 bev256.dataset = 'bev256'
-bev256.data_root = '/data/group1/z44406a/datasets/bevs_256px'
+bev256.data_train_root = './c_bevs_single'
+bev256.data_val_root = './c_bevs_single'
 bev256.epochs_per_eval = 1
 bev256.epochs_per_eval_save = 1
 # bev256.num_images_visualize = 2
@@ -129,10 +130,11 @@ bev256.epochs_per_eval_save = 1
 # bev256.num_temperatures_visualize = 1
 bev256.dec_blocks = "1x2,4m1,4x3,8m4,8x4,16m8,16x9,32m16,32x21,64m32,64x13,128m64,128x7,256m128"
 bev256.enc_blocks = "256x3,256d2,128x8,128d2,64x12,64d2,32x17,32d2,16x7,16d2,8x5,8d2,4x5,4d4,1x4"
-bev256.custom_width_str = "256:128,128:128,64:128,32:256,16:256,8:512,4:512,1:512"  # res:width
-bev256.no_bias_above = 64
-bev256.grad_clip = 130.  # 220.0 #130.
-bev256.skip_threshold = 10000.  # 180.
+# bev256.custom_width_str = "256:128,128:128,64:128,32:256,16:256,8:512,4:512,1:512"  # res:width
+bev256.custom_width_str = "256:64,128:64,64:64,32:64,16:256,8:256,4:512,1:512"  # res:width
+bev256.no_bias_above = 256
+bev256.grad_clip = 130.
+bev256.skip_threshold = 180.
 HPARAMS_REGISTRY['bev256'] = bev256
 
 
@@ -154,6 +156,8 @@ def add_vae_arguments(parser):
     parser.add_argument('--port', type=int, default=29500)
     parser.add_argument('--save_dir', type=str, default='./saved_models')
     parser.add_argument('--data_root', type=str, default='./')
+    parser.add_argument('--data_train_root', type=str, default='./')
+    parser.add_argument('--data_val_root', type=str, default='./')
 
     parser.add_argument('--desc', type=str, default='test')
     parser.add_argument('--hparam_sets', '--hps', type=str)

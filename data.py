@@ -51,14 +51,13 @@ def set_up_data(H):
         shift = -120.63838
         scale = 1. / 64.16736
     elif H.dataset == 'bev64' or H.dataset == 'bev128' or H.dataset == 'bev256':
-        train_data = BEVDataset(H.data_root,
-                                do_rand_rot=H.rotate_samples,
-                                do_extrapolation=H.do_extrapolation,
-                                do_masking=H.do_masking)
-        valid_data = BEVDataset(H.data_root,
-                                reduced_subset_size=256,
-                                do_extrapolation=H.do_extrapolation,
-                                do_masking=H.do_masking)
+        train_data = CompletedBEVDataset(H.data_train_root,
+                                         do_rand_rot=H.rotate_samples,
+                                         do_masking=H.do_masking,
+                                         do_intensity_zeroing=True)
+        valid_data = CompletedBEVDataset(H.data_val_root,
+                                         do_masking=H.do_masking,
+                                         do_intensity_zeroing=True)
         # Create a data matrix
         dataloader = DataLoader(valid_data, len(valid_data))
         vaX = next(iter(dataloader)).numpy()
@@ -382,41 +381,120 @@ class BEVDataset(Dataset):
         return pseudo_bev, pos_dist_field, neg_dist_field
 
 
+class CompletedBEVDataset(Dataset):
+
+    def __init__(
+        self,
+        root_dir,
+        do_rand_rot=False,
+        reduced_subset_size=-1,
+        do_masking=False,
+        mask_p_min=0.95,
+        mask_p_max=0.99,
+        do_intensity_zeroing=False,
+    ):
+        '''
+        Args:
+            root_dir:
+            do_rand_rot:
+            reduced_subset_size: If positive integer ==> Sample size
+            mask_p_min: Probability range for extrapolation masking operation.
+            mask_p_max:
+            do_intensity_zeroing: Make empty intensity elements zero
+
+        '''
+        self.sample_paths = glob.glob(os.path.join(root_dir, '*', '*.pkl.gz'))
+        if reduced_subset_size > 0:
+            # random.shuffle(self.sample_paths)
+            self.sample_paths = self.sample_paths[:reduced_subset_size]
+
+        self.do_rand_rot = do_rand_rot
+        self.do_masking = do_masking
+        self.mask_p_min = mask_p_min
+        self.mask_p_max = mask_p_max
+        self.do_intensity_zeroing = do_intensity_zeroing
+
+    def __len__(self):
+        return len(self.sample_paths)
+
+    def __getitem__(self, idx):
+        '''
+        Returns:
+            sample: BEV sample (H,W,C) in (0, 1) interval.
+        '''
+        sample_path = self.sample_paths[idx]
+        sample = self.read_compressed_pickle(sample_path)
+
+        # Remove redundant batch dimensions (added later)
+        sample = sample[0]
+
+        if self.do_intensity_zeroing:
+            road_idx = 0
+            mask = sample[road_idx] <= 0
+            int = sample[1]
+            int[mask] = 0.
+            sample[1] = int
+
+            oracle_road_idx = 2
+            mask = sample[oracle_road_idx] <= 0
+            int = sample[3]
+            int[mask] = 0.
+            sample[3] = int
+
+        if self.do_rand_rot:
+            k = random.randint(0, 3)
+            sample = torch.rot90(sample, k, [-2, -1])
+
+        return sample
+
+    @staticmethod
+    def read_compressed_pickle(path):
+        try:
+            with gzip.open(path, "rb") as f:
+                pkl_obj = f.read()
+                obj = pickle.loads(pkl_obj)
+                return obj
+        except IOError as error:
+            print(error)
+
+
 if __name__ == '__main__':
 
     import matplotlib.pyplot as plt
     from torch.utils.data import DataLoader
 
     do_rand_rot = False
-    dataset = BEVDataset(
-        '/home/robin/projects/pc-accumulation-lib/bevs_128px_aug',
+    dataset = CompletedBEVDataset(
+        './c_bevs',
         do_rand_rot,
-        100,
-        do_extrapolation=True,
-        do_masking=True,
+        do_masking=False,
+        do_intensity_zeroing=True,
     )
     print(len(dataset))
 
-    batch_size = 4
+    batch_size = 3
 
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for idx, sample in enumerate(dataloader):
 
-        road_present = sample[:, :, :, 0:1]
-        road_future = sample[:, :, :, 1:2]
-        road_full = sample[:, :, :, 2:3]
+        x, x_oracle = sample.chunk(2, dim=1)
+
+        x_road, x_int = x.chunk(2, dim=1)
+        x_oracle_road, x_oracle_int = x_oracle.chunk(2, dim=1)
 
         batch_idx = 0
 
         print(idx, sample.shape)
         for batch_idx in range(batch_size):
-            plt.subplot(3, batch_size, 0 * batch_size + batch_idx + 1)
-            plt.imshow(road_present[batch_idx].numpy())
-            plt.subplot(3, batch_size, 1 * batch_size + batch_idx + 1)
-            plt.imshow(road_future[batch_idx].numpy())
-            plt.subplot(3, batch_size, 2 * batch_size + batch_idx + 1)
-            plt.imshow(road_full[batch_idx].numpy())
+            plt.subplot(4, batch_size, 0 * batch_size + batch_idx + 1)
+            plt.imshow(x_road[batch_idx, 0].numpy())
+            plt.subplot(4, batch_size, 1 * batch_size + batch_idx + 1)
+            plt.imshow(x_int[batch_idx, 0].numpy())
+            plt.subplot(4, batch_size, 2 * batch_size + batch_idx + 1)
+            plt.imshow(x_oracle_road[batch_idx, 0].numpy())
+            plt.subplot(4, batch_size, 3 * batch_size + batch_idx + 1)
+            plt.imshow(x_oracle_int[batch_idx, 0].numpy())
 
         plt.show()
         # plt.savefig(f'dataset_viz_{idx}.png')

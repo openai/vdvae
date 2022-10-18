@@ -23,69 +23,41 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
     vae.zero_grad()
 
-    # B = data_input.shape[0]
-    # device = data_input.get_device()
+    # x:               Partial [-1,1]
+    # x_oracle_target: Completed [0,1]
+    x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
 
-    x_1_prob = data_input[:, :, :, 0:1]  # Extract 'road_present' tensors
-    x_2_prob = data_input[:, :, :, 1:2]  # Extract 'road_future' tensors
-    x_3_prob = data_input[:, :, :, 2:3]  # Extract 'road_full' tensors
+    # NOTE Remove intensity layer for experiment
+    x_road, x_int = x.chunk(2, dim=1)
+    x_oracle_road, x_oracle_int = x_oracle_target.chunk(2, dim=1)
+    x = x_road
+    x_oracle_target = x_oracle_road
 
-    # Value range (0, 1) --> (-1, +1)
-    x_1 = 2 * x_1_prob - 1
-    x_2 = 2 * x_2_prob - 1
-    x_3 = 2 * x_3_prob - 1
+    # x_oracle: Completed [-1,1]
+    x_oracle = x_oracle_target.clone()
+    x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
 
-    # x_2_rot = torch.rot90(x_2, 2, [1, 2])
-    # x_3_rot = torch.rot90(x_3, 2, [1, 2])
-    # x_3_prob_rot = torch.rot90(x_3_prob, 2, [1, 2])
+    # Nomenclature
+    x_post_match = x
+    x_oracle = x_oracle
 
-    # x = torch.concat((x_1, x_2_rot, x_3, x_3_rot))
-    # x_prob = torch.concat((x_3_prob, x_3_prob_rot, x_3_prob, x_3_prob_rot))
-    x_post_match = torch.concat((x_1, x_2))
-    x_oracle = torch.concat((x_3, x_3))
-
-    x_prob = torch.concat((x_3_prob, x_3_prob))
-
-    # Target value thresholding
-    POS_THRESH = 0.75
-    NEG_THRESH = 0.25
-
-    x_prob[x_prob > POS_THRESH] = 1.
-    x_prob[x_prob < NEG_THRESH] = 0.
-
-    # if H.fully_observable:
-    #     x = torch.concat((x_3, x_3_rot, x_3, x_3_rot))
-    #     x_prob = torch.concat((x_3_prob, x_3_prob_rot))
-    #     m_pred = torch.ones_like(x_prob, dtype=torch.bool)
-    #     m_in = m_pred
-    # elif H.fully_observable_pred:
-    #     x = torch.concat((x_1, x_2_rot, x_3, x_3_rot))
-    #     x_prob = torch.concat((x_3_prob, x_3_prob_rot))
-    #     m_pred = torch.ones_like(x_prob, dtype=torch.bool)
-    #     m_in = m_pred
-    # else:
-    m_pred = ~(x_prob == 0.5)
-    m_pred[(x_prob < POS_THRESH) & (x_prob > NEG_THRESH)] = False
-
-    # if H.rnd_noise_ratio > 0.:
-    #     B, h, w, c = x.shape
-    #     # Do not mask the oracle
-    #     B = B // 2
-    #     mask_prob = H.rnd_noise_ratio * torch.rand(1, device=device)
-    #     mask = torch.rand((B, h, w, c), device=device) < mask_prob
-    #     dummy_mask = torch.zeros_like(mask, dtype=torch.bool, device=device)
-    #     mask = torch.concat((mask, dummy_mask))
-    #     x[mask] = 0
+    # Dummy fully observed completed mask
+    m_target = torch.ones_like(x_oracle_target[:, 0:1])
 
     # Add input observability mask
-    m_in = ~(x_post_match == 0)
-    x_post_match = torch.cat((x_post_match, m_in), dim=-1)
+    m_in = ~(x_post_match[:, 0:1] == 0)
+    x_post_match = torch.cat((x_post_match, m_in), dim=1)
+
+    x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
+    x_post_match = torch.permute(x_post_match, (0, 2, 3, 1))
+    x_oracle_target = torch.permute(x_oracle_target, (0, 2, 3, 1))
+    m_target = torch.permute(m_target, (0, 2, 3, 1))
 
     # x_oracle:     (2B,H,W,1) <-- Duplicates of B samples
     # x_post_match: (2B,H,W,2)
     # x_prob:       (2B,H,W,1)
     # m_pred:       (2B,H,W,1)
-    stats = vae.forward(x_oracle, x_post_match, x_prob, m_pred)
+    stats = vae.forward(x_oracle, x_post_match, x_oracle_target, m_target)
 
     stats['elbo'].backward()
     grad_norm = torch.nn.utils.clip_grad_norm_(vae.parameters(),
@@ -114,42 +86,34 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
 def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
-        # device = data_input.get_device()
+        x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
 
-        x_1_prob = data_input[:, :, :, 0:1]  # Extract 'road_present' tensors
-        x_2_prob = data_input[:, :, :, 1:2]  # Extract 'road_future' tensors
-        x_3_prob = data_input[:, :, :, 2:3]  # Extract 'road_full' tensors
+        # NOTE Remove intensity layer for experiment
+        x_road, x_int = x.chunk(2, dim=1)
+        x_oracle_road, x_oracle_int = x_oracle_target.chunk(2, dim=1)
+        x = x_road
+        x_oracle_target = x_oracle_road
 
-        # Value range (0, 1) --> (-1, +1)
-        x_1 = 2 * x_1_prob - 1
-        x_2 = 2 * x_2_prob - 1
-        x_3 = 2 * x_3_prob - 1
+        # x_oracle: Completed road [-1,1]
+        x_oracle = x_oracle_target.clone()
+        x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
 
-        # x_2_rot = torch.rot90(x_2, 2, [1, 2])
-        # x_3_prob_rot = torch.rot90(x_3_prob, 2, [1, 2])
+        x_post_match = x
+        x_oracle = x_oracle
 
-        x_post_match = torch.concat((x_1, x_2))
-        x_oracle = torch.concat((x_3, x_3))
-
-        x_prob = torch.concat((x_3_prob, x_3_prob))
-
-        # x = x_3
-        # x_prob = x_3_prob
-
-        # Target value thresholding
-        POS_THRESH = 0.75
-        NEG_THRESH = 0.25
-
-        x_prob[x_prob > POS_THRESH] = 1.
-        x_prob[x_prob < NEG_THRESH] = 0.
-        m_pred = ~(x_prob == 0.5)
-        m_pred[(x_prob < POS_THRESH) & (x_prob > NEG_THRESH)] = False
+        m_target = torch.ones_like(x_oracle_target[:, 0:1])
 
         # Add input observability mask
-        m_in = ~(x_post_match == 0)
-        x_post_match = torch.cat((x_post_match, m_in), dim=-1)
+        m_in = ~(x_post_match[:, 0:1] == 0)
+        x_post_match = torch.cat((x_post_match, m_in), dim=1)
 
-        stats = ema_vae.forward(x_oracle, x_post_match, x_prob, m_pred)
+        x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
+        x_post_match = torch.permute(x_post_match, (0, 2, 3, 1))
+        x_oracle_target = torch.permute(x_oracle_target, (0, 2, 3, 1))
+        m_target = torch.permute(m_target, (0, 2, 3, 1))
+
+        stats = ema_vae.forward(x_oracle, x_post_match, x_oracle_target,
+                                m_target)
 
     stats = get_cpu_stats_over_ranks(stats)
     return stats
@@ -163,16 +127,25 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
     '''
     for x in DataLoader(data, batch_size=num):
         break
-    # Convert to image value range
-    orig_image = (x * 255.0).to(torch.uint8)
-    preprocessed = preprocess_fn(x)[0]
-    # TODO Centralize the (0, 1) --> (-1, 1) transformation in the preprocessor
-    preprocessed = 2 * preprocessed - 1
-    # Remove 'future' sample
-    # orig_image = orig_image[:, :, :, 0:1]
-    # preprocessed = preprocessed[:, :, :, 0:1]
+    x, x_oracle_target = x.chunk(2, dim=1)  # (B,4,H,W)
 
-    return orig_image, preprocessed
+    # NOTE Remove intensity layer for experiment
+    x_road, x_int = x.chunk(2, dim=1)
+    x_oracle = 2 * x_oracle_target - 1
+    x_oracle_road, x_oracle_int = x_oracle.chunk(2, dim=1)
+    x = x_road
+    x_oracle = x_oracle_road
+
+    x = torch.permute(x, (0, 2, 3, 1))
+    x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
+
+    # Convert to image value range
+    orig_image = (0.5 * (x + 1) * 255.0).to(torch.uint8)
+    orig_image_oracle = (0.5 * (x_oracle + 1) * 255.0).to(torch.uint8)
+    preprocessed = preprocess_fn(x)[0]
+    preprocessed_oracle = preprocess_fn(x_oracle)[0]
+
+    return orig_image, orig_image_oracle, preprocessed, preprocessed_oracle
 
 
 def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
@@ -182,12 +155,8 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
     train_sampler = DistributedSampler(data_train,
                                        num_replicas=H.mpi_size,
                                        rank=H.rank)
-    viz_batch_original, viz_batch_processed = get_sample_for_visualization(
+    viz_batch_original, viz_batch_original_oracle, viz_batch_processed, viz_batch_processed_oracle = get_sample_for_visualization(
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
-
-    # Remove 'future' sample
-    # viz_batch_original = viz_batch_original[:, :, :, 0:1]
-    # viz_batch_processed = viz_batch_processed[:, :, :, 0:1]
 
     early_evals = set([1] + [2**exp for exp in range(3, 14)])
     stats = []
@@ -218,28 +187,15 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                     iters_since_starting in early_evals
                     and H.dataset != 'ffhq_1024') and H.rank == 0:
 
-                # Visualize both 'partial' and 'oracle' samples
-                # POINT: 'Oracle' samples used to get 'z' during training
-                #        ==> Compare how 'partial' does on its own
-                B = viz_batch_original.shape[-1] // 3
-                viz_batch_original_obs = viz_batch_original[:, :, :, :B]
-                viz_batch_original_oracle = viz_batch_original[:, :, :, 2 * B:]
-                viz_batch_processed_obs = viz_batch_processed[:, :, :, :B]
-                viz_batch_processed_oracle = viz_batch_processed[:, :, :,
-                                                                 2 * B:]
-
-                m_in = ~(viz_batch_processed_obs == 0)
-                viz_batch_processed_obs = torch.cat(
-                    (viz_batch_processed_obs, m_in), dim=-1)
-                # m = torch.ones_like(viz_batch_processed_oracle)
-                # viz_batch_processed_oracle = torch.cat(
-                #     (viz_batch_processed_oracle, m), dim=-1)
+                m_in = ~(viz_batch_processed == 0)
+                viz_batch_processed_w_mask = torch.cat(
+                    (viz_batch_processed, m_in), dim=-1)
 
                 for temp in [0.1, 0.4, 1.0]:
                     write_images(H,
                                  ema_vae,
-                                 viz_batch_original_obs,
-                                 viz_batch_processed_obs,
+                                 viz_batch_original,
+                                 viz_batch_processed_w_mask,
                                  viz_batch_original_oracle,
                                  viz_batch_processed_oracle,
                                  f'{H.save_dir}/samples-{iterate}_t{temp}.png',
@@ -382,23 +338,17 @@ def write_images(H,
 
 def run_test_eval(H, ema_vae, data_test, preprocess_fn, logprint):
     print('evaluating')
-    viz_batch_original, viz_batch_processed = get_sample_for_visualization(
+    viz_batch_original, viz_batch_original_oracle, viz_batch_processed, viz_batch_processed_oracle = get_sample_for_visualization(
         data_test, preprocess_fn, H.num_images_visualize, H.dataset)
 
-    # Visualize both 'partial' and 'oracle' samples
-    # POINT: 'Oracle' samples used to get 'z' during training
-    #        ==> Compare how 'partial' does on its own
-    B = viz_batch_processed.shape[0] // 2
-    viz_batch_original_oracle = viz_batch_original[B:]
-    viz_batch_processed_oracle = viz_batch_processed[B:]
-    viz_batch_processed_obs = viz_batch_processed[:B]
-    viz_batch_original_obs = viz_batch_original[:B]
+    m_in = ~(viz_batch_processed == 0)
+    viz_batch_processed_w_mask = torch.cat((viz_batch_processed, m_in), dim=-1)
 
     for temp in [0.1, 0.4, 1.0]:
         write_images(H,
                      ema_vae,
-                     viz_batch_original_obs,
-                     viz_batch_processed_obs,
+                     viz_batch_original,
+                     viz_batch_processed_w_mask,
                      viz_batch_original_oracle,
                      viz_batch_processed_oracle,
                      f'{H.save_dir}/samples-eval_t{temp}.png',
