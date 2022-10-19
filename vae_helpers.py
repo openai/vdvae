@@ -270,20 +270,30 @@ class DmolNet(nn.Module):
         # num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
         self.out_conv = get_conv(
             H.width,
-            1,  # H.num_mixtures * num_mix_distr_params,
+            2,  # H.num_mixtures * num_mix_distr_params,
             kernel_size=1,
             stride=1,
             padding=0)
 
     def nll(self, px_z, x, mask):
         x_hat = self.forward(px_z)
+
+        x_hat_road = x_hat[:, :, :, 0:1]
+        x_hat_int = x_hat[:, :, :, 1:2]
+        x_road = x[:, :, :, 0:1]
+        x_int = x[:, :, :, 1:2]
+
         if self.rec_objective == 'ce':
-            recon_loss = -1. * binary_cross_entropy(x_hat, x, mask)
+            recon_road = -1. * binary_cross_entropy(x_hat_road, x_road, mask)
+            recon_int = mse(x_hat_int, x_int, mask)
         elif self.rec_objective == 'mse':
-            recon_loss = mse(x_hat, x, mask)
+            recon_road = mse(x_hat_road, x_road, mask)
+            recon_int = mse(x_hat_int, x_int, mask)
         else:
             raise Exception(
                 f'Undefined reconstruction objective ({self.rec_objective})')
+
+        recon_loss = recon_road + recon_int
 
         return recon_loss
         # return discretized_mix_logistic_loss(x=x,
