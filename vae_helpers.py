@@ -285,7 +285,7 @@ class DmolNet(nn.Module):
 
         if self.rec_objective == 'ce':
             recon_road = -1. * binary_cross_entropy(x_hat_road, x_road, mask)
-            recon_int = mse(x_hat_int, x_int, mask)
+            recon_int = -1. * binary_cross_entropy(x_hat_int, x_int, mask)
         elif self.rec_objective == 'mse':
             recon_road = mse(x_hat_road, x_road, mask)
             recon_int = mse(x_hat_int, x_int, mask)
