@@ -34,8 +34,9 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     # x_oracle_target = x_oracle_road
 
     # x_oracle: Completed [-1,1]
+    x_oracle_target = 2 * x_oracle_target - 1
     x_oracle = x_oracle_target.clone()
-    x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
+    # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
 
     # Nomenclature
     x_post_match = x
@@ -95,8 +96,9 @@ def eval_step(data_input, target, ema_vae):
         # x_oracle_target = x_oracle_road
 
         # x_oracle: Completed road [-1,1]
+        x_oracle_target = 2 * x_oracle_target - 1
         x_oracle = x_oracle_target.clone()
-        x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
+        # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
 
         x_post_match = x
         x_oracle = x_oracle
@@ -135,7 +137,8 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
     # x = x_road
     # x_oracle = x_oracle_road
 
-    x_oracle = 2 * x_oracle_target - 1
+    x_oracle_target = 2 * x_oracle_target - 1
+    x_oracle = x_oracle_target.clone()
 
     x = torch.permute(x, (0, 2, 3, 1))
     x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
@@ -164,7 +167,7 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
     viz_batch_original, viz_batch_original_oracle, viz_batch_processed, viz_batch_processed_oracle = get_sample_for_visualization(
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
 
-    early_evals = set([1] + [2**exp for exp in range(3, 14)])
+    early_evals = set([9999999])  # set([1] + [2**exp for exp in range(3, 14)])
     stats = []
     iters_since_starting = 0
     H.ema_rate = torch.as_tensor(H.ema_rate).cuda()
@@ -197,7 +200,7 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
                 viz_batch_processed_w_mask = torch.cat(
                     (viz_batch_processed, m_in), dim=-1)
 
-                for temp in [0.1, 0.4, 1.0]:
+                for temp in H.viz_temps:
                     write_images(H,
                                  ema_vae,
                                  viz_batch_original,

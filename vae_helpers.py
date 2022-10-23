@@ -113,7 +113,12 @@ def mse(x_hat, x, obs_mask=None):
 
 
 def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
-    """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval """
+    """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval 
+
+    Args:
+        x: Target torch.Tensor() (B,H,W,C) in interval (-1, 1).
+        l: Prediction torch.Tensor() (B,H,W,100).
+    """
     # Adapted from https://github.com/openai/pixel-cnn/blob/master/pixel_cnn_pp/nn.py
     # true image (i.e. labels) to regress to, e.g. (B,32,32,3)
     xs = [s for s in x.shape]
@@ -230,6 +235,15 @@ def sample_from_discretized_mix_logistic(l, nr_mix, ch=3):
     if ch == 1:
         x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
         x_out = torch.reshape(x0, xs[:-1] + [1])
+    if ch == 2:
+        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
+        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
+                       1.)
+        x_out = torch.cat([
+            torch.reshape(x0, xs[:-1] + [1]),
+            torch.reshape(x1, xs[:-1] + [1])
+        ],
+                          dim=3)
     # Old
     elif ch == 3:
         x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
@@ -267,51 +281,52 @@ class DmolNet(nn.Module):
         self.width = H.width
         self.ch = H.image_channels
         self.rec_objective = H.rec_objective
-        # num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
+        num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
         self.out_conv = get_conv(
             H.width,
-            2,  # H.num_mixtures * num_mix_distr_params,
+            H.num_mixtures * num_mix_distr_params,  # 2,
             kernel_size=1,
             stride=1,
             padding=0)
 
     def nll(self, px_z, x, mask):
-        x_hat = self.forward(px_z)
+        # x_hat = self.forward(px_z)
 
-        x_hat_road = x_hat[:, :, :, 0:1]
-        x_hat_int = x_hat[:, :, :, 1:2]
-        x_road = x[:, :, :, 0:1]
-        x_int = x[:, :, :, 1:2]
+        # x_hat_road = x_hat[:, :, :, 0:1]
+        # x_hat_int = x_hat[:, :, :, 1:2]
+        # x_road = x[:, :, :, 0:1]
+        # x_int = x[:, :, :, 1:2]
 
-        if self.rec_objective == 'ce':
-            recon_road = -1. * binary_cross_entropy(x_hat_road, x_road, mask)
-            recon_int = -1. * binary_cross_entropy(x_hat_int, x_int, mask)
-        elif self.rec_objective == 'mse':
-            recon_road = mse(x_hat_road, x_road, mask)
-            recon_int = mse(x_hat_int, x_int, mask)
-        else:
-            raise Exception(
-                f'Undefined reconstruction objective ({self.rec_objective})')
+        # if self.rec_objective == 'ce':
+        #     recon_road = -1. * binary_cross_entropy(x_hat_road, x_road, mask)
+        #     recon_int = -1. * binary_cross_entropy(x_hat_int, x_int, mask)
+        # elif self.rec_objective == 'mse':
+        #     recon_road = mse(x_hat_road, x_road, mask)
+        #     recon_int = mse(x_hat_int, x_int, mask)
+        # else:
+        #     raise Exception(
+        #         f'Undefined reconstruction objective ({self.rec_objective})')
 
-        recon_loss = recon_road + recon_int
+        # recon_loss = recon_road + recon_int
 
-        return recon_loss
-        # return discretized_mix_logistic_loss(x=x,
-        #                                      l=self.forward(px_z),
-        #                                      mask=mask,
-        #                                      low_bit=self.H.dataset
-        #                                      in ['ffhq_256'])
+        # return recon_loss
+        return discretized_mix_logistic_loss(x=x,
+                                             l=self.forward(px_z),
+                                             mask=mask[:, :, :, 0],
+                                             low_bit=self.H.dataset
+                                             in ['ffhq_256'])
 
     def forward(self, px_z):
         x_hat = self.out_conv(px_z)
-        x_hat = torch.sigmoid(x_hat)
+        # x_hat = torch.sigmoid(x_hat)
         return x_hat.permute(0, 2, 3, 1)
 
     def sample(self, px_z):
-        # im = sample_from_discretized_mix_logistic(self.forward(px_z),
-        #                                           self.H.num_mixtures, self.ch)
-        x_hat = self.forward(px_z)
-        x_hat = x_hat * 255.
+        im = sample_from_discretized_mix_logistic(self.forward(px_z),
+                                                  self.H.num_mixtures, self.ch)
+        x_hat = (im + 1.0) * 127.5
+        # x_hat = self.forward(px_z)
+        # x_hat = x_hat * 255.
         x_hat = x_hat.detach().cpu().numpy()
         x_hat = np.minimum(np.maximum(0.0, x_hat), 255.0).astype(np.uint8)
         return x_hat
