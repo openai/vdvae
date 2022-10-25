@@ -23,20 +23,27 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
     vae.zero_grad()
 
-    # x:               Partial [-1,1]
     # x_oracle_target: Completed [0,1]
     x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
 
-    # NOTE Remove intensity layer for experiment
-    # x_road, x_int = x.chunk(2, dim=1)
-    # x_oracle_road, x_oracle_int = x_oracle_target.chunk(2, dim=1)
-    # x = x_road
-    # x_oracle_target = x_oracle_road
+    # x:               Partial [-1,1]
+    x[:, 1:2] = 2 * x[:, 1:2] - 1
 
-    # x_oracle: Completed [-1,1]
-    x_oracle_target = 2 * x_oracle_target - 1
+    # x_oracle:        Completed [-1,1]
     x_oracle = x_oracle_target.clone()
     # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
+    x_oracle = 2 * x_oracle - 1
+
+    # Make non-road intensity 0
+    m_oracle = ~(x_oracle[:, 0:1] == -1)
+    x_oracle_int = x_oracle[:, 1:2]
+    x_oracle_int[~m_oracle] = 0.
+    x_oracle[:, 1:2] = x_oracle_int
+
+    m_in_road = (x[:, 0:1] > 0.25)
+    x_int = x[:, 1:2]
+    x_int[~m_in_road] = 0.
+    x[:, 1:2] = x_int
 
     # Nomenclature
     x_post_match = x
@@ -89,16 +96,23 @@ def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
         x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
 
-        # NOTE Remove intensity layer for experiment
-        # x_road, x_int = x.chunk(2, dim=1)
-        # x_oracle_road, x_oracle_int = x_oracle_target.chunk(2, dim=1)
-        # x = x_road
-        # x_oracle_target = x_oracle_road
+        x[:, 1:2] = 2 * x[:, 1:2] - 1
 
         # x_oracle: Completed road [-1,1]
-        x_oracle_target = 2 * x_oracle_target - 1
         x_oracle = x_oracle_target.clone()
         # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
+        x_oracle = 2 * x_oracle - 1
+
+        # Make non-road intensity 0
+        m_oracle = ~(x_oracle[:, 0:1] == -1)
+        x_oracle_int = x_oracle[:, 1:2]
+        x_oracle_int[~m_oracle] = 0.
+        x_oracle[:, 1:2] = x_oracle_int
+
+        m_in_road = (x[:, 0:1] > 0.25)
+        x_int = x[:, 1:2]
+        x_int[~m_in_road] = 0.
+        x[:, 1:2] = x_int
 
         x_post_match = x
         x_oracle = x_oracle
@@ -131,25 +145,33 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
         break
     x, x_oracle_target = x.chunk(2, dim=1)  # (B,4,H,W)
 
-    # NOTE Remove intensity layer for experiment
-    # x_road, x_int = x.chunk(2, dim=1)
-    # x_oracle_road, x_oracle_int = x_oracle.chunk(2, dim=1)
-    # x = x_road
-    # x_oracle = x_oracle_road
-
-    x_oracle_target = 2 * x_oracle_target - 1
+    x[:, 1:2] = 2 * x[:, 1:2] - 1
     x_oracle = x_oracle_target.clone()
+    x_oracle = 2 * x_oracle - 1
+
+    # Make non-road intensity 0
+    m_oracle = ~(x_oracle[:, 0:1] == -1)
+    x_oracle_int = x_oracle[:, 1:2]
+    x_oracle_int[~m_oracle] = 0.
+    x_oracle[:, 1:2] = x_oracle_int
+
+    m_in_road = (x[:, 0:1] > 0.25)
+    x_int = x[:, 1:2]
+    x_int[~m_in_road] = 0.
+    x[:, 1:2] = x_int
 
     x = torch.permute(x, (0, 2, 3, 1))
     x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
 
     # Convert to image value range
     orig_image = x.clone()
-    orig_image[:, :, :, 0:1] = 0.5 * (x[:, :, :, 0:1] + 1)
+    # orig_image[:, :, :, 0:1] = 0.5 * (x[:, :, :, 0:1] + 1)
+    orig_image = 0.5 * (x + 1)
     orig_image = (orig_image * 255.0).to(torch.uint8)
 
     orig_image_oracle = x_oracle.clone()
-    orig_image_oracle[:, :, :, 0:1] = 0.5 * (x_oracle[:, :, :, 0:1] + 1)
+    # orig_image_oracle[:, :, :, 0:1] = 0.5 * (x_oracle[:, :, :, 0:1] + 1)
+    orig_image_oracle = 0.5 * (x_oracle + 1)
     orig_image_oracle = (orig_image_oracle * 255.0).to(torch.uint8)
     preprocessed = preprocess_fn(x)[0]
     preprocessed_oracle = preprocess_fn(x_oracle)[0]
