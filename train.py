@@ -30,9 +30,10 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     x[:, 1:2] = 2 * x[:, 1:2] - 1
 
     # x_oracle:        Completed [-1,1]
+    x_oracle_target = 2 * x_oracle_target - 1
     x_oracle = x_oracle_target.clone()
     # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
-    x_oracle = 2 * x_oracle - 1
+    # x_oracle = 2 * x_oracle - 1
 
     # Make non-road intensity 0
     m_oracle = ~(x_oracle[:, 0:1] == -1)
@@ -99,9 +100,10 @@ def eval_step(data_input, target, ema_vae):
         x[:, 1:2] = 2 * x[:, 1:2] - 1
 
         # x_oracle: Completed road [-1,1]
+        x_oracle_target = 2 * x_oracle_target - 1
         x_oracle = x_oracle_target.clone()
         # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
-        x_oracle = 2 * x_oracle - 1
+        # x_oracle = 2 * x_oracle - 1
 
         # Make non-road intensity 0
         m_oracle = ~(x_oracle[:, 0:1] == -1)
