@@ -133,6 +133,8 @@ def eval_step(data_input, target, ema_vae):
         stats = ema_vae.forward(x_oracle, x_post_match, x_oracle_target,
                                 m_target)
 
+        # x_hat = ema_vae.inference(x_post_match)
+
     stats = get_cpu_stats_over_ranks(stats)
     return stats
 
@@ -377,7 +379,10 @@ def run_test_eval(H, ema_vae, data_test, preprocess_fn, logprint):
     viz_batch_original, viz_batch_original_oracle, viz_batch_processed, viz_batch_processed_oracle = get_sample_for_visualization(
         data_test, preprocess_fn, H.num_images_visualize, H.dataset)
 
-    m_in = ~(viz_batch_processed == 0)
+    # m_in = ~(viz_batch_processed == 0)
+    # viz_batch_processed_w_mask = torch.cat((viz_batch_processed, m_in), dim=-1)
+
+    m_in = ~(viz_batch_processed[:, :, :, 0:1] == 0)
     viz_batch_processed_w_mask = torch.cat((viz_batch_processed, m_in), dim=-1)
 
     for temp in [0.1, 0.4, 1.0]:

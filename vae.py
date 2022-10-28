@@ -375,6 +375,13 @@ class VAE(HModule):
 
         self.w_kl_oracle = self.H.w_kl_oracle
 
+    def inference(self, x):
+        acts_post_match = self.encoder_post_match.forward(x)
+        px_z, _ = self.decoder.forward(acts_post_match, mode='post_match')
+        x_hat = self.decoder.out_net.sample(px_z)
+
+        return x_hat
+
     def forward(self,
                 x_oracle,
                 x_post_match,
