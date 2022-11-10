@@ -149,7 +149,7 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
         break
     x, x_oracle_target = x.chunk(2, dim=1)  # (B,4,H,W)
 
-    x[:, 1:2] = 2 * x[:, 1:2] - 1
+    # x[:, 1:2] = 2 * x[:, 1:2] - 1
     x_oracle = x_oracle_target.clone()
     x_oracle = 2 * x_oracle - 1
 
