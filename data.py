@@ -428,18 +428,18 @@ class CompletedBEVDataset(Dataset):
         # Remove redundant batch dimensions (added later)
         sample = sample[0]
 
-        if self.do_intensity_zeroing:
-            road_idx = 0
-            mask = sample[road_idx] <= 0
-            int = sample[1]
-            int[mask] = 0.
-            sample[1] = int
-
-            oracle_road_idx = 2
-            mask = sample[oracle_road_idx] <= 0
-            int = sample[3]
-            int[mask] = 0.
-            sample[3] = int
+        # if self.do_intensity_zeroing:
+        #     road_idx = 0
+        #     mask = sample[road_idx] <= 0
+        #     int = sample[1]
+        #     int[mask] = 0.
+        #     sample[1] = int
+        #
+        #     oracle_road_idx = 2
+        #     mask = sample[oracle_road_idx] <= 0
+        #     int = sample[3]
+        #     int[mask] = 0.
+        #     sample[3] = int
 
         if self.do_rand_rot:
             k = random.randint(0, 3)

@@ -16,6 +16,10 @@ from utils import arrange_side_by_side, get_cpu_stats_over_ranks, image_grid
 
 def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     '''
+
+    Both input and targets need to be in the interval (-1, 1).
+    Intensity that is blank is 0 for both oracle and posterior matching.
+
     Args:
         data_input: (B,H,W,C)
     '''
@@ -23,11 +27,11 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
     vae.zero_grad()
 
-    # x_oracle_target: Completed [0,1]
+    # x_oracle_target: Completed [-1,1]
     x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
 
     # x:               Partial [-1,1]
-    x[:, 1:2] = 2 * x[:, 1:2] - 1
+    # x[:, 1:2] = 2 * x[:, 1:2] - 1
 
     # x_oracle:        Completed [-1,1]
     x_oracle_target = 2 * x_oracle_target - 1
@@ -40,11 +44,11 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     x_oracle_int = x_oracle[:, 1:2]
     x_oracle_int[~m_oracle] = 0.
     x_oracle[:, 1:2] = x_oracle_int
-
-    m_in_road = (x[:, 0:1] > 0.25)
-    x_int = x[:, 1:2]
-    x_int[~m_in_road] = 0.
-    x[:, 1:2] = x_int
+    #
+    # m_in_road = (x[:, 0:1] > 0.25)
+    # x_int = x[:, 1:2]
+    # x_int[~m_in_road] = 0.
+    # x[:, 1:2] = x_int
 
     # Nomenclature
     x_post_match = x
@@ -62,10 +66,10 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     x_oracle_target = torch.permute(x_oracle_target, (0, 2, 3, 1))
     m_target = torch.permute(m_target, (0, 2, 3, 1))
 
-    # x_oracle:     (2B,H,W,1) <-- Duplicates of B samples
-    # x_post_match: (2B,H,W,2)
-    # x_prob:       (2B,H,W,1)
-    # m_pred:       (2B,H,W,1)
+    # x_oracle:        (2B,H,W,1) (-1,1) <-- Duplicates of B samples
+    # x_post_match:    (2B,H,W,2) (-1,1)
+    # x_oracle_target: (2B,H,W,1) (-1,1)
+    # m_target:        (2B,H,W,1)
     stats = vae.forward(x_oracle, x_post_match, x_oracle_target, m_target)
 
     stats['elbo'].backward()
@@ -97,7 +101,7 @@ def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
         x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
 
-        x[:, 1:2] = 2 * x[:, 1:2] - 1
+        # x[:, 1:2] = 2 * x[:, 1:2] - 1
 
         # x_oracle: Completed road [-1,1]
         x_oracle_target = 2 * x_oracle_target - 1
@@ -111,10 +115,10 @@ def eval_step(data_input, target, ema_vae):
         x_oracle_int[~m_oracle] = 0.
         x_oracle[:, 1:2] = x_oracle_int
 
-        m_in_road = (x[:, 0:1] > 0.25)
-        x_int = x[:, 1:2]
-        x_int[~m_in_road] = 0.
-        x[:, 1:2] = x_int
+        # m_in_road = (x[:, 0:1] > 0.25)
+        # x_int = x[:, 1:2]
+        # x_int[~m_in_road] = 0.
+        # x[:, 1:2] = x_int
 
         x_post_match = x
         x_oracle = x_oracle
@@ -159,10 +163,10 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
     x_oracle_int[~m_oracle] = 0.
     x_oracle[:, 1:2] = x_oracle_int
 
-    m_in_road = (x[:, 0:1] > 0.25)
-    x_int = x[:, 1:2]
-    x_int[~m_in_road] = 0.
-    x[:, 1:2] = x_int
+    # m_in_road = (x[:, 0:1] > 0.25)
+    # x_int = x[:, 1:2]
+    # x_int[~m_in_road] = 0.
+    # x[:, 1:2] = x_int
 
     x = torch.permute(x, (0, 2, 3, 1))
     x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
