@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 DISTR_PARAM_NUM = 3
-NUM_CLASSES = 100
+NUM_CLASSES = 255
 
 
 @torch.jit.script
@@ -242,6 +242,27 @@ def sample_from_discretized_mix_logistic(l, nr_mix, ch=3):
         x_out = torch.cat([
             torch.reshape(x0, xs[:-1] + [1]),
             torch.reshape(x1, xs[:-1] + [1])
+        ],
+                          dim=3)
+    elif ch == 5:
+        # Road
+        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
+        # Intensity
+        x1 = const_min(const_max(x[:, :, :, 1], -1.), 1.)
+        # RGB
+        x2 = const_min(const_max(x[:, :, :, 2], -1.), 1.)
+        x3 = const_min(const_max(x[:, :, :, 3] + coeffs[:, :, :, 2] * x2, -1.),
+                       1.)
+        x4 = const_min(
+            const_max(
+                x[:, :, :, 4] + coeffs[:, :, :, 3] * x2 +
+                coeffs[:, :, :, 4] * x3, -1.), 1.)
+        x_out = torch.cat([
+            torch.reshape(x0, xs[:-1] + [1]),
+            torch.reshape(x1, xs[:-1] + [1]),
+            torch.reshape(x2, xs[:-1] + [1]),
+            torch.reshape(x3, xs[:-1] + [1]),
+            torch.reshape(x4, xs[:-1] + [1]),
         ],
                           dim=3)
     # Old

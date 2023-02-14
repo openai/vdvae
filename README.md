@@ -18,6 +18,15 @@ cd apex
 pip install -v --no-cache-dir --global-option="--cpp_ext" --global-option="--cuda_ext" ./
 FOR SC: pip install -v --disable-pip-version-check --no-cache-dir ./
 cd ..
+
+# distributed setting
+export WORLD_SIZE=1
+export MASTER_PORT=12358
+export MASTER_ADDR=$(hostname -I | awk '{print $1}')
+export NODE_RANK=0
+export RANK=0
+export LOCAL_RANK=0
+
 ```
 
 Also, you'll have to download the data, depending on which one you want to run:

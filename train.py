@@ -21,29 +21,32 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     Intensity that is blank is 0 for both oracle and posterior matching.
 
     Args:
-        data_input: (B,H,W,C)
+        data_input: (B,H,W,C) (-1,1)
     '''
     t0 = time.time()
 
     vae.zero_grad()
 
     # x_oracle_target: Completed [-1,1]
-    x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
+    # x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
+    x = data_input[:, 0:5]  # (-1,1)
+    x_oracle_target = data_input[:, 5:10]  # (-1,1)
+    # x_traj = data_input[:, 10:11]
 
     # x:               Partial [-1,1]
     # x[:, 1:2] = 2 * x[:, 1:2] - 1
 
     # x_oracle:        Completed [-1,1]
-    x_oracle_target = 2 * x_oracle_target - 1
+    # x_oracle_target = 2 * x_oracle_target - 1
     x_oracle = x_oracle_target.clone()
     # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
     # x_oracle = 2 * x_oracle - 1
 
     # Make non-road intensity 0
-    m_oracle = ~(x_oracle[:, 0:1] == -1)
-    x_oracle_int = x_oracle[:, 1:2]
-    x_oracle_int[~m_oracle] = 0.
-    x_oracle[:, 1:2] = x_oracle_int
+    # m_oracle = ~(x_oracle[:, 0:1] == -1)
+    # x_oracle_int = x_oracle[:, 1:2]
+    # x_oracle_int[~m_oracle] = 0.
+    # x_oracle[:, 1:2] = x_oracle_int
     #
     # m_in_road = (x[:, 0:1] > 0.25)
     # x_int = x[:, 1:2]
@@ -66,9 +69,9 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
     x_oracle_target = torch.permute(x_oracle_target, (0, 2, 3, 1))
     m_target = torch.permute(m_target, (0, 2, 3, 1))
 
-    # x_oracle:        (2B,H,W,1) (-1,1) <-- Duplicates of B samples
-    # x_post_match:    (2B,H,W,2) (-1,1)
-    # x_oracle_target: (2B,H,W,1) (-1,1)
+    # x_oracle:        (2B,H,W,5) (-1,1) <-- Duplicates of B samples
+    # x_post_match:    (2B,H,W,6) (-1,1)
+    # x_oracle_target: (2B,H,W,5) (-1,1)
     # m_target:        (2B,H,W,1)
     stats = vae.forward(x_oracle, x_post_match, x_oracle_target, m_target)
 
@@ -99,21 +102,23 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
 def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
-        x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
+        # x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
+        x = data_input[:, 0:5]  # (-1,1)
+        x_oracle_target = data_input[:, 5:10]  # (-1,1)
 
         # x[:, 1:2] = 2 * x[:, 1:2] - 1
 
         # x_oracle: Completed road [-1,1]
-        x_oracle_target = 2 * x_oracle_target - 1
+        # x_oracle_target = 2 * x_oracle_target - 1
         x_oracle = x_oracle_target.clone()
         # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
         # x_oracle = 2 * x_oracle - 1
 
         # Make non-road intensity 0
-        m_oracle = ~(x_oracle[:, 0:1] == -1)
-        x_oracle_int = x_oracle[:, 1:2]
-        x_oracle_int[~m_oracle] = 0.
-        x_oracle[:, 1:2] = x_oracle_int
+        # m_oracle = ~(x_oracle[:, 0:1] == -1)
+        # x_oracle_int = x_oracle[:, 1:2]
+        # x_oracle_int[~m_oracle] = 0.
+        # x_oracle[:, 1:2] = x_oracle_int
 
         # m_in_road = (x[:, 0:1] > 0.25)
         # x_int = x[:, 1:2]
@@ -149,37 +154,23 @@ def get_sample_for_visualization(data, preprocess_fn, num, dataset):
         orig_image: RGB (np.uint8) image w. dim (B, H, W, C).
         preprocessed: Tensor in range (-1, 1) w. dim (B, H, W, C).
     '''
-    for x in DataLoader(data, batch_size=num):
+    for data_input in DataLoader(data, batch_size=num):
         break
-    x, x_oracle_target = x.chunk(2, dim=1)  # (B,4,H,W)
+    x = data_input[:, 0:5]  # (B,5,H,W) (-1,1)
+    x_oracle_target = data_input[:, 5:10]  # (B,5,H,W) (0,1)
 
-    # x[:, 1:2] = 2 * x[:, 1:2] - 1
     x_oracle = x_oracle_target.clone()
-    x_oracle = 2 * x_oracle - 1
-
-    # Make non-road intensity 0
-    m_oracle = ~(x_oracle[:, 0:1] == -1)
-    x_oracle_int = x_oracle[:, 1:2]
-    x_oracle_int[~m_oracle] = 0.
-    x_oracle[:, 1:2] = x_oracle_int
-
-    # m_in_road = (x[:, 0:1] > 0.25)
-    # x_int = x[:, 1:2]
-    # x_int[~m_in_road] = 0.
-    # x[:, 1:2] = x_int
 
     x = torch.permute(x, (0, 2, 3, 1))
     x_oracle = torch.permute(x_oracle, (0, 2, 3, 1))
 
     # Convert to image value range
     orig_image = x.clone()
-    # orig_image[:, :, :, 0:1] = 0.5 * (x[:, :, :, 0:1] + 1)
-    orig_image = 0.5 * (x + 1)
+    orig_image = 0.5 * (orig_image + 1)
     orig_image = (orig_image * 255.0).to(torch.uint8)
 
     orig_image_oracle = x_oracle.clone()
-    # orig_image_oracle[:, :, :, 0:1] = 0.5 * (x_oracle[:, :, :, 0:1] + 1)
-    orig_image_oracle = 0.5 * (x_oracle + 1)
+    orig_image_oracle = 0.5 * (orig_image_oracle + 1)
     orig_image_oracle = (orig_image_oracle * 255.0).to(torch.uint8)
     preprocessed = preprocess_fn(x)[0]
     preprocessed_oracle = preprocess_fn(x_oracle)[0]
@@ -352,15 +343,17 @@ def write_images(H,
     for t in viz_temps_list[:H.num_temperatures_visualize]:
         batches.append(ema_vae.forward_uncond_samples(mb, t=t))
     n_rows = len(batches)
-    ch = latent_obs[0].shape[-1]
-    # Remove observation mask input layer
-    viz_batch_processed = viz_batch_processed[:, :, :, 0:2]
-    im = np.concatenate(batches, axis=0).reshape(
-        (n_rows, mb,
-         *viz_batch_processed.shape[1:])).transpose([0, 2, 1, 3, 4]).reshape([
-             n_rows * viz_batch_processed.shape[1],
-             mb * viz_batch_processed.shape[2], ch
-         ])
+
+    # Add (road, intensity) visualizations (single channel)
+    ch = 2  # latent_obs[0].shape[-1]
+    batches_tmp = [viz[:, :, :, :2] for viz in batches]
+    viz_batch_processed_tmp = viz_batch_processed[:, :, :, 0:2]
+    im = np.concatenate(batches_tmp, axis=0).reshape(
+        (n_rows, mb, *viz_batch_processed_tmp.shape[1:])).transpose(
+            [0, 2, 1, 3, 4]).reshape([
+                n_rows * viz_batch_processed_tmp.shape[1],
+                mb * viz_batch_processed_tmp.shape[2], ch
+            ])
     logprint(f'printing samples to {fname}')
 
     # Concatenate 'road' and 'intensity' visualizations to side-by-side img
@@ -368,9 +361,22 @@ def write_images(H,
 
     cm = plt.get_cmap('viridis')
     im = cm(im)
-    # im = im[:, :, 0]  # (W,H,C)
+    im = im[:, :, :3]  # Remove alpha channel
 
     im = (255 * im).astype(np.uint8)
+
+    # Add RGB visualizations (three channels)
+    ch_rgb = 3
+    batches_tmp = [viz[:, :, :, 2:5] for viz in batches]
+    viz_batch_processed_tmp = viz_batch_processed[:, :, :, 2:5]
+    im_rgb = np.concatenate(batches_tmp, axis=0).reshape(
+        (n_rows, mb, *viz_batch_processed_tmp.shape[1:])).transpose(
+            [0, 2, 1, 3, 4]).reshape([
+                n_rows * viz_batch_processed_tmp.shape[1],
+                mb * viz_batch_processed_tmp.shape[2], ch_rgb
+            ])
+
+    im = np.concatenate((im, im_rgb), axis=1)
 
     _, grid_h, grid_w, _ = viz_batch_processed.shape
     im = image_grid(im, grid_h, grid_w)

@@ -62,8 +62,8 @@ def set_up_data(H):
         dataloader = DataLoader(valid_data, len(valid_data))
         vaX = next(iter(dataloader)).numpy()
         teX = vaX
-        H.image_channels = 2
-        H.image_channels_post_match = 3
+        H.image_channels = 5
+        H.image_channels_post_match = 6  # Incl. mask
         shift = 0.
         scale = 1.
         if H.dataset == 'bev64':
@@ -420,7 +420,7 @@ class CompletedBEVDataset(Dataset):
     def __getitem__(self, idx):
         '''
         Returns:
-            sample: BEV sample (H,W,C) in (0, 1) interval.
+            sample: BEV sample (H,W,C) in (-1, 1) interval.
         '''
         sample_path = self.sample_paths[idx]
         sample = self.read_compressed_pickle(sample_path)
@@ -444,6 +444,13 @@ class CompletedBEVDataset(Dataset):
         if self.do_rand_rot:
             k = random.randint(0, 3)
             sample = torch.rot90(sample, k, [-2, -1])
+
+        # Oracle road, int (0,1) --> (-1,1)
+        sample[5:7] = 2 * sample[5:7] - 1
+
+        # RGB (0,1) --> (-1,1)
+        sample[2:5] = 2 * sample[2:5] - 1
+        sample[7:10] = 2 * sample[7:10] - 1
 
         return sample
 
