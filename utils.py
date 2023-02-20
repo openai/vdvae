@@ -10,6 +10,8 @@ import torch.distributed as dist
 
 # from mpi4py import MPI
 
+NUM_GPUS = 6
+
 
 def allreduce(x, average):
     if mpi_size() > 1:
@@ -160,9 +162,9 @@ def mpi_rank():
 
 def num_nodes():
     nn = mpi_size()
-    if nn % 4 == 0:
-        return nn // 4
-    return nn // 4 + 1
+    if nn % NUM_GPUS == 0:
+        return nn // NUM_GPUS
+    return nn // NUM_GPUS + 1
 
 
 def gpus_per_node():

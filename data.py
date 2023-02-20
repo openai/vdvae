@@ -59,9 +59,9 @@ def set_up_data(H):
                                          do_masking=H.do_masking,
                                          do_intensity_zeroing=True)
         # Create a data matrix
-        dataloader = DataLoader(valid_data, len(valid_data))
-        vaX = next(iter(dataloader)).numpy()
-        teX = vaX
+        # dataloader = DataLoader(valid_data, len(valid_data))
+        # vaX = next(iter(dataloader)).numpy()
+        # teX = vaX
         H.image_channels = 5
         H.image_channels_post_match = 6  # Incl. mask
         shift = 0.
@@ -81,7 +81,7 @@ def set_up_data(H):
         print('DOING TEST')
         eval_dataset = teX
     else:
-        eval_dataset = vaX
+        eval_dataset = None  # vaX
 
     shift = torch.tensor([shift]).cuda().view(1, 1, 1, 1)
     scale = torch.tensor([scale]).cuda().view(1, 1, 1, 1)
