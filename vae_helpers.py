@@ -262,13 +262,6 @@ def sample_from_discretized_mix_logistic(l, nr_mix, ch=3):
         # x4 = const_min(const_max(x[:, :, :, 4], -1.), 1.)
         x4 = const_min(const_max(x[:, :, :, 4] + coeffs[:, :, :, 0] * x0, -1.),
                        1.)
-        # x2 = const_min(const_max(x[:, :, :, 2], -1.), 1.)
-        # x3 = const_min(const_max(x[:, :, :, 3] + coeffs[:, :, :, 2] * x2, -1.),
-        #                1.)
-        # x4 = const_min(
-        #     const_max(
-        #         x[:, :, :, 4] + coeffs[:, :, :, 3] * x2 +
-        #         coeffs[:, :, :, 4] * x3, -1.), 1.)
         x_out = torch.cat([
             torch.reshape(x0, xs[:-1] + [1]),
             torch.reshape(x1, xs[:-1] + [1]),
