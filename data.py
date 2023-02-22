@@ -79,7 +79,7 @@ def set_up_data(H):
 
     if H.test_eval:
         print('DOING TEST')
-        eval_dataset = teX
+        eval_dataset = None  # teX
     else:
         eval_dataset = None  # vaX
 

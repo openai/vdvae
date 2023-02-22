@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-DISTR_PARAM_NUM = 3
+# DISTR_PARAM_NUM = 3
 NUM_CLASSES = 255
 
 
@@ -112,39 +112,224 @@ def mse(x_hat, x, obs_mask=None):
     return mse.sum(dim=(1, 2, 3)) / obs_mask.sum(dim=(1, 2, 3))
 
 
+def get_num_mix_distr_params(num_ch):
+    '''
+    Returns the number of paramters required for each mixture distribution.
+
+    Ex: RGB (3 ch) w. 10 mixtures
+        (3 + 3 + 3 + 1) * 10 = 100
+                10 <-- returned
+
+        WM (5 ch) w. 10 mixtures
+        (10 + 5 + 5 + 1) * 10 = 210
+                21 <-- returned
+    '''
+    if num_ch == 3:
+        num_coeffs = 3
+    elif num_ch == 5:
+        num_coeffs = 10
+    else:
+        raise NotImplementedError()
+
+    num_mus = num_ch
+    num_scales = num_ch
+    num_pis = 1
+
+    return num_coeffs + num_mus + num_scales + num_pis, num_coeffs
+
+
+def unpack_pred_params(pred, ch, num_mix, num_coeffs):
+    '''
+    Returns a tuple of conditional logistic mixture distribution paramters.
+
+    NOTE: Removes extracted coefficients for easy indexing.
+
+    Args:
+        pred: (B,H,W,N)
+        ch:
+        num_mix:
+        num_coeffs:
+
+    Returns:
+
+    '''
+    B = pred.shape[0]
+    H = pred.shape[1]
+    W = pred.shape[2]
+
+    # Mixture probabilities (B,H,W,#mix)
+    logit_probs = pred[:, :, :, :num_mix]
+
+    pred = pred[:, :, :, num_mix:]
+
+    # Conditional linear dependence model coefficients (B,H,W,#coeffs,#mix)
+    coeffs = pred[:, :, :, :num_coeffs * num_mix]
+    coeffs = torch.reshape(coeffs, (B, H, W, num_coeffs, num_mix))
+    coeffs = torch.tanh(coeffs)
+
+    pred = pred[:, :, :, num_coeffs * num_mix:]
+
+    # Reshape paramters to channel-wise order
+    pred = torch.reshape(pred, (B, H, W, ch, -1))
+
+    # Mean and scale parameters
+    means = pred[:, :, :, :, :num_mix]
+    log_scales = pred[:, :, :, :, num_mix:2 * num_mix]
+
+    return logit_probs, coeffs, means, log_scales
+
+
+def conditional_distr_train_5ch(m, c, x):
+    '''
+    Args:
+        m: Mean paramters (B,H,W,C,#mix)
+        c: Conditional linar depedence model paramters (B,H,#coeff,#mix)
+        x: Target tensor w. duplicated elements in #mix dim (B,H,W,C,#mix)
+
+    m0 = means[:, :, :, 0, :]
+    m1 = means[:, :, :, 1, :] + coeffs[:, :, :, 0, :] * x[:, :, :, 0, :]
+    m2 = means[:, :, :, 2, :] + coeffs[:, :, :, 1, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 2, :] * x[:, :, :, 1, :]
+    m3 = means[:, :, :, 3, :] + coeffs[:, :, :, 3, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 4, :] * x[:, :, :, 1, :] + coeffs[:,:,:, 5, :] * x[:, :, :, 2, :]
+    m4 = means[:, :, :, 4, :] + coeffs[:, :, :, 6, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 7, :] * x[:, :, :, 1, :] + coeffs[:,:,:, 8, :] * x[:, :, :, 2, :] + coeffs[:,:,:, 9, :] * x[:, :, :, 3, :]
+    '''
+
+    m0 = m[:, :, :, 0, :]
+    m1 = m[:, :, :, 1, :] + c[:, :, :, 0, :] * x[:, :, :, 0, :]
+    m2 = m[:, :, :,
+           2, :] + c[:, :, :, 1, :] * x[:, :, :, 0, :] + c[:, :, :,
+                                                           2, :] * x[:, :, :,
+                                                                     1, :]
+    m3 = m[:, :, :,
+           3, :] + c[:, :, :,
+                     3, :] * x[:, :, :,
+                               0, :] + c[:, :, :,
+                                         4, :] * x[:, :, :,
+                                                   1, :] + c[:, :, :,
+                                                             5, :] * x[:, :, :,
+                                                                       2, :]
+    m4 = m[:, :, :,
+           4, :] + c[:, :, :,
+                     6, :] * x[:, :, :,
+                               0, :] + c[:, :, :,
+                                         7, :] * x[:, :, :,
+                                                   1, :] + c[:, :, :,
+                                                             8, :] * x[:, :, :,
+                                                                       2, :] + c[:, :, :,
+                                                                                 9, :] * x[:, :, :,
+                                                                                           3, :]
+
+    m = torch.stack((m0, m1, m2, m3, m4), dim=-2)  # (B,H,W,C,#mix)
+    return m
+
+
+def conditional_distr_inference_5ch(x, c):
+    '''
+    NOTE: Remember the clamping operation to (-1, 1)
+    Args:
+        m: Mean paramters (B,H,W,C)
+        c: Conditional linar depedence model paramters (B,H,#coeff)
+
+    x0 = x[:, :, :, 0]
+    x1 = x[:, :, :, 1] + coeffs[:, :, :, 0] * x0
+    x2 = x[:, :, :, 2] + coeffs[:, :, :, 1] * x0 + coeffs[:,:,:, 2] * x1
+    x3 = x[:, :, :, 3] + coeffs[:, :, :, 3] * x0 + coeffs[:,:,:, 4] * x1 + coeffs[:,:,:, 5] * x2
+    x4 = x[:, :, :, 4] + coeffs[:, :, :, 6] * x0 + coeffs[:,:,:, 7] * x1 + coeffs[:,:,:, 8] * x2 + coeffs[:,:,:, 9] * x3
+    '''
+    x0 = const_min(const_max(x[:, :, :, 0], -1), 1)
+    x1 = const_min(const_max(x[:, :, :, 1] + c[:, :, :, 0] * x0, -1), 1)
+    x2 = const_min(
+        const_max(x[:, :, :, 2] + c[:, :, :, 1] * x0 + c[:, :, :, 2] * x1, -1),
+        1)
+    x3 = const_min(
+        const_max(
+            x[:, :, :, 3] + c[:, :, :, 3] * x0 + c[:, :, :, 4] * x1 +
+            c[:, :, :, 5] * x2, -1), 1)
+    x4 = const_min(
+        const_max(
+            x[:, :, :, 4] + c[:, :, :, 6] * x0 + c[:, :, :, 7] * x1 +
+            c[:, :, :, 8] * x2 + c[:, :, :, 9] * x3, -1), 1)
+
+    x = torch.stack((x0, x1, x2, x3, x4), dim=-1)  # (B,H,W,C)
+    return x
+
+
 def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
-    """ log-likelihood for mixture of discretized logistics, assumes the data has been rescaled to [-1,1] interval 
+    """
+    Log-likelihood for mixture of discretized logistics, assumes the data has
+    been rescaled to [-1,1] interval.
+
+    Ref: Adapted from https://github.com/openai/pixel-cnn/blob/master/pixel_cnn_pp/nn.py
+
+    Structure of prediction tensor 'l':
+        l[0:1*#mix] --> Mixture probabilities 'pi'
+        Remove 'pi' ==> l = l[#mix:]
+        Restruct (B,H,W,200) --> (B,H,W,C,)
+        l[1*#mix:2*#mix] --> means
+        l[2*#mix:3*#mix] --> log_scales
+        l[3*#mix:] --> conditional distr. coefficients
 
     Args:
         x: Target torch.Tensor() (B,H,W,C) in interval (-1, 1).
         l: Prediction torch.Tensor() (B,H,W,100).
     """
-    # Adapted from https://github.com/openai/pixel-cnn/blob/master/pixel_cnn_pp/nn.py
+    ##################################
+    #  Unpack prediction tensor 'l'
+    ##################################
     # true image (i.e. labels) to regress to, e.g. (B,32,32,3)
     xs = [s for s in x.shape]
     # predicted distribution, e.g. (B,32,32,100)
     ls = [s for s in l.shape]
     ch = xs[-1]
-    num_params_per_distr = 3 * ch + 1  # [mu, s, w]*C + 1
+    # num_params_per_distr = 3 * ch + 1  # [mu, s, w]*C + 1
+    num_params_per_distr, num_coeffs = get_num_mix_distr_params(ch)
     nr_mix = int(ls[-1] / num_params_per_distr)
     # here and below: unpacking the params of the mixture of logistics
-    logit_probs = l[:, :, :, :nr_mix]
-    l = torch.reshape(l[:, :, :, nr_mix:], xs + [nr_mix * DISTR_PARAM_NUM])
-    means = l[:, :, :, :, :nr_mix]
-    log_scales = const_max(l[:, :, :, :, nr_mix:2 * nr_mix], -7.)
-    coeffs = torch.tanh(l[:, :, :, :, 2 * nr_mix:3 * nr_mix])
+    # Mixture probabilities 'pi': (B,H,W,#mixtures)
+
+    logit_probs, coeffs, means, log_scales = unpack_pred_params(
+        l, ch, nr_mix, num_coeffs)
+    log_scales = const_max(log_scales, -7.)
+
+    # logit_probs = l[:, :, :, :nr_mix]
+    # Remove 'pi' paramters --> (B,H,W, M' = N-#mixtures)
+    # l = l[:, :, :, nr_mix:]
+    # Coefficients 'c': (B,H,W, #coeff*#mixtures)
+    # coeffs = l[:, :, :, :nr_mix * num_coeffs]
+    # coeffs = torch.reshape(coeffs, [xs[0], xs[1], xs[2], num_coeffs, nr_mix])
+    # coeffs = torch.tanh(coeffs)
+    # Remove 'coefficient' paramters --> (B,H,W, M = M'-#mixtures*10)
+    # l = l[:, :, :, nr_mix * num_coeffs:]
+    # Reshape paramters channel-wise --> (B,W,C,10+10)
+    # l = torch.reshape(l, xs + [nr_mix * DISTR_PARAM_NUM])
+    # l = torch.reshape(l, xs + [-1])
+    # Extract channel-wise paramters
+    # means = l[:, :, :, :, :nr_mix]  # (B,H,W,C,#mix)
+    # log_scales = const_max(l[:, :, :, :, nr_mix:2 * nr_mix], -7.)
+    # coeffs = torch.tanh(l[:, :, :, :, 2 * nr_mix:3 * nr_mix])
+    # coeffs = torch.tanh(l[:, :, :, :, 2 * nr_mix:])
+
+    #######################################################################
+    #  Conditional distributions
+    #
+    #  Original text
+    #    - here and below: getting the means and adjusting them based on
+    #      preceding sub-pixels
+    #
+    #  NOTE: Adds 'target value' as 'r' etc.
+    #######################################################################
     x = torch.reshape(x, xs + [1]) + torch.zeros(xs + [nr_mix]).to(
-        x.device
-    )  # here and below: getting the means and adjusting them based on preceding sub-pixels
-    ms = []
-    m_1 = torch.reshape(means[:, :, :, 0, :], [xs[0], xs[1], xs[2], 1, nr_mix])
-    ms.append(m_1)
-    for idx in range(1, means.shape[3]):
-        m_idx = torch.reshape(
-            means[:, :, :, idx, :] +
-            coeffs[:, :, :, idx - 1, :] * x[:, :, :, 0, :],
-            [xs[0], xs[1], xs[2], 1, nr_mix])
-        ms.append(m_idx)
+        x.device)  # Expand last dim to each mixture distr?
+    means = conditional_distr_train_5ch(means, coeffs, x)
+
+    # ms = []
+    # m_1 = torch.reshape(means[:, :, :, 0, :], [xs[0], xs[1], xs[2], 1, nr_mix])
+    # ms.append(m_1)
+    # for idx in range(1, means.shape[3]):
+    #     m_idx = torch.reshape(
+    #         means[:, :, :, idx, :] +
+    #         coeffs[:, :, :, idx - 1, :] * x[:, :, :, 0, :],
+    #         [xs[0], xs[1], xs[2], 1, nr_mix])
+    #     ms.append(m_idx)
     # m2 = torch.reshape(
     #     means[:, :, :, 1, :] + coeffs[:, :, :, 0, :] * x[:, :, :, 0, :],
     #     [xs[0], xs[1], xs[2], 1, nr_mix])
@@ -152,7 +337,7 @@ def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
     #     means[:, :, :, 2, :] + coeffs[:, :, :, 1, :] * x[:, :, :, 0, :] +
     #     coeffs[:, :, :, 2, :] * x[:, :, :, 1, :],
     #     [xs[0], xs[1], xs[2], 1, nr_mix])
-    means = torch.cat(ms, dim=3)
+    # means = torch.cat(ms, dim=3)
     centered_x = x - means
     inv_stdv = torch.exp(-log_scales)
     if low_bit:
@@ -211,82 +396,89 @@ def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
 def sample_from_discretized_mix_logistic(l, nr_mix, ch=3):
     ls = [s for s in l.shape]
     xs = ls[:-1] + [ch]
+    num_params_per_distr, num_coeffs = get_num_mix_distr_params(ch)
+    nr_mix = int(ls[-1] / num_params_per_distr)
+
     # unpack parameters
-    logit_probs = l[:, :, :, :nr_mix]
-    l = torch.reshape(l[:, :, :, nr_mix:], xs + [nr_mix * DISTR_PARAM_NUM])
+    logit_probs, coeffs, means, log_scales = unpack_pred_params(
+        l, ch, nr_mix, num_coeffs)
+
+    # logit_probs = l[:, :, :, :nr_mix]
+    # l = torch.reshape(l[:, :, :, nr_mix:], xs + [nr_mix * DISTR_PARAM_NUM])
     # sample mixture indicator from softmax
     eps = torch.empty(logit_probs.shape,
                       device=l.device).uniform_(1e-5, 1. - 1e-5)
     amax = torch.argmax(logit_probs - torch.log(-torch.log(eps)), dim=3)
     sel = F.one_hot(amax, num_classes=nr_mix).float()
-    sel = torch.reshape(sel, xs[:-1] + [1, nr_mix])
+    sel = torch.reshape(sel, xs[:-1] + [1, nr_mix])  # (B,H,W,1,#mix)
     # select logistic parameters
-    means = (l[:, :, :, :, :nr_mix] * sel).sum(dim=4)
-    log_scales = const_max((l[:, :, :, :, nr_mix:nr_mix * 2] * sel).sum(dim=4),
-                           -7.)
-    coeffs = (torch.tanh(l[:, :, :, :, nr_mix * 2:nr_mix * 3]) *
-              sel).sum(dim=4)
+    # means = (l[:, :, :, :, :nr_mix] * sel).sum(dim=4)
+    means = (means * sel).sum(dim=4)
+    log_scales = const_max((log_scales * sel).sum(dim=4), -7.)
+    coeffs = (coeffs * sel).sum(dim=4)
     # sample from logistic & clip to interval
     # we don't actually round to the nearest 8bit value when sampling
     u = torch.empty(means.shape, device=means.device).uniform_(1e-5, 1. - 1e-5)
     x = means + torch.exp(log_scales) * (torch.log(u) - torch.log(1. - u))
 
-    # New
-    if ch == 1:
-        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-        x_out = torch.reshape(x0, xs[:-1] + [1])
-    if ch == 2:
-        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
-                       1.)
-        x_out = torch.cat([
-            torch.reshape(x0, xs[:-1] + [1]),
-            torch.reshape(x1, xs[:-1] + [1])
-        ],
-                          dim=3)
-    elif ch == 5:
-        # Condition all other outputs on 'road' (i.e. pred structure) output
-        # Road
-        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-        # Intensity
-        # x1 = const_min(const_max(x[:, :, :, 1], -1.), 1.)
-        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
-                       1.)
-        # RGB
-        # x2 = const_min(const_max(x[:, :, :, 2], -1.), 1.)
-        x2 = const_min(const_max(x[:, :, :, 2] + coeffs[:, :, :, 0] * x0, -1.),
-                       1.)
-        # x3 = const_min(const_max(x[:, :, :, 3], -1.), 1.)
-        x3 = const_min(const_max(x[:, :, :, 3] + coeffs[:, :, :, 0] * x0, -1.),
-                       1.)
-        # x4 = const_min(const_max(x[:, :, :, 4], -1.), 1.)
-        x4 = const_min(const_max(x[:, :, :, 4] + coeffs[:, :, :, 0] * x0, -1.),
-                       1.)
-        x_out = torch.cat([
-            torch.reshape(x0, xs[:-1] + [1]),
-            torch.reshape(x1, xs[:-1] + [1]),
-            torch.reshape(x2, xs[:-1] + [1]),
-            torch.reshape(x3, xs[:-1] + [1]),
-            torch.reshape(x4, xs[:-1] + [1]),
-        ],
-                          dim=3)
-    # Old
-    elif ch == 3:
-        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
-                       1.)
-        x2 = const_min(
-            const_max(
-                x[:, :, :, 2] + coeffs[:, :, :, 1] * x0 +
-                coeffs[:, :, :, 2] * x1, -1.), 1.)
-        x_out = torch.cat([
-            torch.reshape(x0, xs[:-1] + [1]),
-            torch.reshape(x1, xs[:-1] + [1]),
-            torch.reshape(x2, xs[:-1] + [1])
-        ],
-                          dim=3)
-    else:
-        raise NotImplementedError()
+    x_out = conditional_distr_inference_5ch(x, coeffs)
+
+    #    # New
+    #    if ch == 1:
+    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
+    #        x_out = torch.reshape(x0, xs[:-1] + [1])
+    #    if ch == 2:
+    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
+    #        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
+    #                       1.)
+    #        x_out = torch.cat([
+    #            torch.reshape(x0, xs[:-1] + [1]),
+    #            torch.reshape(x1, xs[:-1] + [1])
+    #        ],
+    #                          dim=3)
+    #    elif ch == 5:
+    #        # Condition all other outputs on 'road' (i.e. pred structure) output
+    #        # Road
+    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
+    #        # Intensity
+    #        # x1 = const_min(const_max(x[:, :, :, 1], -1.), 1.)
+    #        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
+    #                       1.)
+    #        # RGB
+    #        x2 = const_min(const_max(x[:, :, :, 2], -1.), 1.)
+    #        # x2 = const_min(const_max(x[:, :, :, 2] + coeffs[:, :, :, 0] * x0, -1.),
+    #        #                1.)
+    #        x3 = const_min(const_max(x[:, :, :, 3], -1.), 1.)
+    #        # x3 = const_min(const_max(x[:, :, :, 3] + coeffs[:, :, :, 0] * x0, -1.),
+    #        #                1.)
+    #        x4 = const_min(const_max(x[:, :, :, 4], -1.), 1.)
+    #        # x4 = const_min(const_max(x[:, :, :, 4] + coeffs[:, :, :, 0] * x0, -1.),
+    #        #                1.)
+    #        x_out = torch.cat([
+    #            torch.reshape(x0, xs[:-1] + [1]),
+    #            torch.reshape(x1, xs[:-1] + [1]),
+    #            torch.reshape(x2, xs[:-1] + [1]),
+    #            torch.reshape(x3, xs[:-1] + [1]),
+    #            torch.reshape(x4, xs[:-1] + [1]),
+    #        ],
+    #                          dim=3)
+    #    # Old
+    #    elif ch == 3:
+    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
+    #        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
+    #                       1.)
+    #        x2 = const_min(
+    #            const_max(
+    #                x[:, :, :, 2] + coeffs[:, :, :, 1] * x0 +
+    #                coeffs[:, :, :, 2] * x1, -1.), 1.)
+    #        x_out = torch.cat([
+    #            torch.reshape(x0, xs[:-1] + [1]),
+    #            torch.reshape(x1, xs[:-1] + [1]),
+    #            torch.reshape(x2, xs[:-1] + [1])
+    #        ],
+    #                          dim=3)
+    #    else:
+    #        raise NotImplementedError()
 
     return x_out
 
@@ -307,7 +499,8 @@ class DmolNet(nn.Module):
         self.width = H.width
         self.ch = H.image_channels
         self.rec_objective = H.rec_objective
-        num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
+        # num_mix_distr_params = 3 * self.ch + 1  # [mu, s, w]*C + 1
+        num_mix_distr_params, _ = get_num_mix_distr_params(self.ch)
         self.out_conv = get_conv(
             H.width,
             H.num_mixtures * num_mix_distr_params,  # 2,
