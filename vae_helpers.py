@@ -127,7 +127,8 @@ def get_num_mix_distr_params(num_ch):
     if num_ch == 3:
         num_coeffs = 3
     elif num_ch == 5:
-        num_coeffs = 10
+        # num_coeffs = 10  # Fully conditional
+        num_coeffs = 7
     else:
         raise NotImplementedError()
 
@@ -186,37 +187,63 @@ def conditional_distr_train_5ch(m, c, x):
         c: Conditional linar depedence model paramters (B,H,#coeff,#mix)
         x: Target tensor w. duplicated elements in #mix dim (B,H,W,C,#mix)
 
+    Fully conditional p(B|G,R,i,r)p(G|R,i,r)p(R|i,r)p(i|r)p(r)
     m0 = means[:, :, :, 0, :]
     m1 = means[:, :, :, 1, :] + coeffs[:, :, :, 0, :] * x[:, :, :, 0, :]
     m2 = means[:, :, :, 2, :] + coeffs[:, :, :, 1, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 2, :] * x[:, :, :, 1, :]
     m3 = means[:, :, :, 3, :] + coeffs[:, :, :, 3, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 4, :] * x[:, :, :, 1, :] + coeffs[:,:,:, 5, :] * x[:, :, :, 2, :]
     m4 = means[:, :, :, 4, :] + coeffs[:, :, :, 6, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 7, :] * x[:, :, :, 1, :] + coeffs[:,:,:, 8, :] * x[:, :, :, 2, :] + coeffs[:,:,:, 9, :] * x[:, :, :, 3, :]
-    '''
 
+    Road conditional p(B|G,R,r)P(G|R,r)p(R|r)p(i|r)p(r)
+    m0 = means[:, :, :, 0, :]
+    m1 = means[:, :, :, 1, :] + coeffs[:, :, :, 0, :] * x[:, :, :, 0, :]
+    m2 = means[:, :, :, 2, :] + coeffs[:, :, :, 1, :] * x[:, :, :, 0, :]
+    m3 = means[:, :, :, 3, :] + coeffs[:, :, :, 2, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 3, :] * x[:, :, :, 2, :]
+    m4 = means[:, :, :, 4, :] + coeffs[:, :, :, 4, :] * x[:, :, :, 0, :] + coeffs[:,:,:, 5, :] * x[:, :, :, 2, :] + coeffs[:,:,:, 6, :] * x[:, :, :, 3, :]
+
+    '''
+    # Fully conditional p(B|G,R,i,r)p(G|R,i,r)p(R|i,r)p(i|r)p(r)
+    #    m0 = m[:, :, :, 0, :]
+    #    m1 = m[:, :, :, 1, :] + c[:, :, :, 0, :] * x[:, :, :, 0, :]
+    #    m2 = m[:, :, :,
+    #           2, :] + c[:, :, :, 1, :] * x[:, :, :, 0, :] + c[:, :, :,
+    #                                                           2, :] * x[:, :, :,
+    #                                                                     1, :]
+    #    m3 = m[:, :, :,
+    #           3, :] + c[:, :, :,
+    #                     3, :] * x[:, :, :,
+    #                               0, :] + c[:, :, :,
+    #                                         4, :] * x[:, :, :,
+    #                                                   1, :] + c[:, :, :,
+    #                                                             5, :] * x[:, :, :,
+    #                                                                       2, :]
+    #    m4 = m[:, :, :,
+    #           4, :] + c[:, :, :,
+    #                     6, :] * x[:, :, :,
+    #                               0, :] + c[:, :, :,
+    #                                         7, :] * x[:, :, :,
+    #                                                   1, :] + c[:, :, :,
+    #                                                             8, :] * x[:, :, :,
+    #                                                                       2, :] + c[:, :, :,
+    #                                                                                 9, :] * x[:, :, :,
+    #                                                                                           3, :]
+
+    # Road conditional p(B|G,R,r)P(G|R,r)p(R|r)p(i|r)p(r)
     m0 = m[:, :, :, 0, :]
     m1 = m[:, :, :, 1, :] + c[:, :, :, 0, :] * x[:, :, :, 0, :]
-    m2 = m[:, :, :,
-           2, :] + c[:, :, :, 1, :] * x[:, :, :, 0, :] + c[:, :, :,
-                                                           2, :] * x[:, :, :,
-                                                                     1, :]
+    m2 = m[:, :, :, 2, :] + c[:, :, :, 1, :] * x[:, :, :, 0, :]
     m3 = m[:, :, :,
-           3, :] + c[:, :, :,
-                     3, :] * x[:, :, :,
-                               0, :] + c[:, :, :,
-                                         4, :] * x[:, :, :,
-                                                   1, :] + c[:, :, :,
-                                                             5, :] * x[:, :, :,
-                                                                       2, :]
+           3, :] + c[:, :, :, 2, :] * x[:, :, :, 0, :] + c[:, :, :,
+                                                           3, :] * x[:, :, :,
+                                                                     2, :]
     m4 = m[:, :, :,
            4, :] + c[:, :, :,
-                     6, :] * x[:, :, :,
+                     4, :] * x[:, :, :,
                                0, :] + c[:, :, :,
-                                         7, :] * x[:, :, :,
-                                                   1, :] + c[:, :, :,
-                                                             8, :] * x[:, :, :,
-                                                                       2, :] + c[:, :, :,
-                                                                                 9, :] * x[:, :, :,
-                                                                                           3, :]
+                                         5, :] * x[:, :, :,
+                                                   2, :] + c[:, :, :,
+                                                             6, :] * x[:, :, :,
+                                                                       3, :]
 
     m = torch.stack((m0, m1, m2, m3, m4), dim=-2)  # (B,H,W,C,#mix)
     return m
@@ -229,25 +256,43 @@ def conditional_distr_inference_5ch(x, c):
         m: Mean paramters (B,H,W,C)
         c: Conditional linar depedence model paramters (B,H,#coeff)
 
+    Fully conditional p(B|G,R,i,r)p(G|R,i,r)p(R|i,r)p(i|r)p(r)
     x0 = x[:, :, :, 0]
     x1 = x[:, :, :, 1] + coeffs[:, :, :, 0] * x0
     x2 = x[:, :, :, 2] + coeffs[:, :, :, 1] * x0 + coeffs[:,:,:, 2] * x1
     x3 = x[:, :, :, 3] + coeffs[:, :, :, 3] * x0 + coeffs[:,:,:, 4] * x1 + coeffs[:,:,:, 5] * x2
     x4 = x[:, :, :, 4] + coeffs[:, :, :, 6] * x0 + coeffs[:,:,:, 7] * x1 + coeffs[:,:,:, 8] * x2 + coeffs[:,:,:, 9] * x3
+
+    Road conditional p(B|G,R,r)P(G|R,r)p(R|r)p(i|r)p(r)
+    x0 = x[:, :, :, 0]
+    x1 = x[:, :, :, 1] + coeffs[:, :, :, 0] * x0
+    x2 = x[:, :, :, 2] + coeffs[:, :, :, 1] * x0
+    x3 = x[:, :, :, 3] + coeffs[:, :, :, 2] * x0 + coeffs[:,:,:, 3] * x2
+    x4 = x[:, :, :, 4] + coeffs[:, :, :, 4] * x0 + coeffs[:,:,:, 5] * x2 + coeffs[:,:,:, 6] * x3
+
     '''
-    x0 = const_min(const_max(x[:, :, :, 0], -1), 1)
-    x1 = const_min(const_max(x[:, :, :, 1] + c[:, :, :, 0] * x0, -1), 1)
-    x2 = const_min(
-        const_max(x[:, :, :, 2] + c[:, :, :, 1] * x0 + c[:, :, :, 2] * x1, -1),
-        1)
-    x3 = const_min(
-        const_max(
-            x[:, :, :, 3] + c[:, :, :, 3] * x0 + c[:, :, :, 4] * x1 +
-            c[:, :, :, 5] * x2, -1), 1)
-    x4 = const_min(
-        const_max(
-            x[:, :, :, 4] + c[:, :, :, 6] * x0 + c[:, :, :, 7] * x1 +
-            c[:, :, :, 8] * x2 + c[:, :, :, 9] * x3, -1), 1)
+    # Fully conditional p(B|G,R,i,r)p(G|R,i,r)p(R|i,r)p(i|r)p(r)
+    # x0 = const_min(const_max(x[:, :, :, 0], -1), 1)
+    # x1 = const_min(const_max(x[:, :, :, 1] + c[:, :, :, 0] * x0, -1), 1)
+    # x2 = const_min(
+    #     const_max(x[:, :, :, 2] + c[:, :, :, 1] * x0 + c[:, :, :, 2] * x1, -1),
+    #     1)
+    # x3 = const_min(
+    #     const_max(
+    #         x[:, :, :, 3] + c[:, :, :, 3] * x0 + c[:, :, :, 4] * x1 +
+    #         c[:, :, :, 5] * x2, -1), 1)
+    # x4 = const_min(
+    #     const_max(
+    #         x[:, :, :, 4] + c[:, :, :, 6] * x0 + c[:, :, :, 7] * x1 +
+    #         c[:, :, :, 8] * x2 + c[:, :, :, 9] * x3, -1), 1)
+
+    # Road conditional p(B|G,R,r)P(G|R,r)p(R|r)p(i|r)p(r)
+    x0 = x[:, :, :, 0]
+    x1 = x[:, :, :, 1] + c[:, :, :, 0] * x0
+    x2 = x[:, :, :, 2] + c[:, :, :, 1] * x0
+    x3 = x[:, :, :, 3] + c[:, :, :, 2] * x0 + c[:, :, :, 3] * x2
+    x4 = x[:, :, :,
+           4] + c[:, :, :, 4] * x0 + c[:, :, :, 5] * x2 + c[:, :, :, 6] * x3
 
     x = torch.stack((x0, x1, x2, x3, x4), dim=-1)  # (B,H,W,C)
     return x
