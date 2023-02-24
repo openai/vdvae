@@ -252,6 +252,7 @@ def conditional_distr_train_5ch(m, c, x):
 def conditional_distr_inference_5ch(x, c):
     '''
     NOTE: Remember the clamping operation to (-1, 1)
+
     Args:
         m: Mean paramters (B,H,W,C)
         c: Conditional linar depedence model paramters (B,H,#coeff)
@@ -287,12 +288,16 @@ def conditional_distr_inference_5ch(x, c):
     #         c[:, :, :, 8] * x2 + c[:, :, :, 9] * x3, -1), 1)
 
     # Road conditional p(B|G,R,r)P(G|R,r)p(R|r)p(i|r)p(r)
-    x0 = x[:, :, :, 0]
-    x1 = x[:, :, :, 1] + c[:, :, :, 0] * x0
-    x2 = x[:, :, :, 2] + c[:, :, :, 1] * x0
-    x3 = x[:, :, :, 3] + c[:, :, :, 2] * x0 + c[:, :, :, 3] * x2
-    x4 = x[:, :, :,
-           4] + c[:, :, :, 4] * x0 + c[:, :, :, 5] * x2 + c[:, :, :, 6] * x3
+    x0 = const_min(const_max(x[:, :, :, 0], -1), 1)
+    x1 = const_min(const_max(x[:, :, :, 1] + c[:, :, :, 0] * x0, -1), 1)
+    x2 = const_min(const_max(x[:, :, :, 2] + c[:, :, :, 1] * x0, -1), 1)
+    x3 = const_min(
+        const_max(x[:, :, :, 3] + c[:, :, :, 2] * x0 + c[:, :, :, 3] * x2, -1),
+        1)
+    x4 = const_min(
+        const_max(
+            x[:, :, :, 4] + c[:, :, :, 4] * x0 + c[:, :, :, 5] * x2 +
+            c[:, :, :, 6] * x3, -1), 1)
 
     x = torch.stack((x0, x1, x2, x3, x4), dim=-1)  # (B,H,W,C)
     return x
