@@ -375,20 +375,25 @@ class VAE(HModule):
 
         self.w_kl_oracle = self.H.w_kl_oracle
 
-    def inference(self, x, temp=1.):
-        # acts_post_match = self.encoder_post_match.forward(x)
-        # px_z, _ = self.decoder.forward(acts_post_match, mode='post_match')
-        # x_hat = self.decoder.out_net.sample(px_z)
-        zs = [
-            s['z'].cuda()
-            for s in self.forward_get_latents(x, mode='post_match')
-        ]
-        mb = x.shape[0]
-        x_hat = self.forward_samples_set_latents(
-            mb,
-            zs,
-            t=temp,
-        )
+    def inference(self, x, temp=1, start_prior_sampling_idx=55):
+        # Full posterior sampling
+        if temp == 1:
+            acts = self.encoder_post_match.forward(x)
+            px_z, _ = self.decoder.forward(acts, mode='post_match')
+            x_hat = self.decoder.out_net.sample(px_z)
+        # Mixed posterior and final prior sampling with specified temperature
+        else:
+            zs = [
+                s['z'].cuda()
+                for s in self.forward_get_latents(x, mode='post_match')
+            ]
+            mb = x.shape[0]
+            x_hat = self.forward_samples_set_latents(
+                mb,
+                zs[:start_prior_sampling_idx],
+                t=temp,
+            )
+
         return x_hat
 
     def forward(self,
