@@ -9,6 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from data import set_up_data
+# from debug import viz_vae_forward_input
 from train_helpers import (accumulate_stats, load_opt, load_vaes, save_model,
                            set_up_hyperparams, update_ema)
 from utils import arrange_side_by_side, get_cpu_stats_over_ranks, image_grid
@@ -318,6 +319,18 @@ def write_images(H,
     oracle_viz = viz_batch_original_oracle.numpy()
     input_viz = arrange_side_by_side(obs_viz, oracle_viz)
     batches = [input_viz]
+
+    # Posterior sampling viz
+    acts = ema_vae.encoder_post_match.forward(viz_batch_processed)
+    px_z, _ = ema_vae.decoder.forward(acts, mode='post_match')
+    post_obs = ema_vae.decoder.out_net.sample(px_z)
+
+    acts = ema_vae.encoder.forward(viz_batch_processed_oracle)
+    px_z, _ = ema_vae.decoder.forward(acts, mode='oracle')
+    post_oracle = ema_vae.decoder.out_net.sample(px_z)
+
+    post_viz = arrange_side_by_side(post_obs, post_oracle)
+    batches.append(post_viz)
 
     mb = input_viz.shape[0]
     lv_points = np.floor(
