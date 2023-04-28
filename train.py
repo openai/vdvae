@@ -28,35 +28,15 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
     vae.zero_grad()
 
-    # x_oracle_target: Completed [-1,1]
-    # x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
-    x = data_input[:, 0:5]  # (-1,1)
-    x_oracle_target = data_input[:, 5:10]  # (-1,1)
-    # x_traj = data_input[:, 10:11]
-
     # x:               Partial [-1,1]
-    # x[:, 1:2] = 2 * x[:, 1:2] - 1
-
     # x_oracle:        Completed [-1,1]
-    # x_oracle_target = 2 * x_oracle_target - 1
+    # x_oracle_target: Completed [-1,1]
+    x = data_input[:, 0:5]
+    x_oracle_target = data_input[:, 5:10]
     x_oracle = x_oracle_target.clone()
-    # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
-    # x_oracle = 2 * x_oracle - 1
 
-    # Make non-road intensity 0
-    # m_oracle = ~(x_oracle[:, 0:1] == -1)
-    # x_oracle_int = x_oracle[:, 1:2]
-    # x_oracle_int[~m_oracle] = 0.
-    # x_oracle[:, 1:2] = x_oracle_int
-    #
-    # m_in_road = (x[:, 0:1] > 0.25)
-    # x_int = x[:, 1:2]
-    # x_int[~m_in_road] = 0.
-    # x[:, 1:2] = x_int
-
-    # Nomenclature
+    # Renaming for paper nomenclature
     x_post_match = x
-    x_oracle = x_oracle
 
     # Dummy fully observed completed mask
     m_target = torch.ones_like(x_oracle_target[:, 0:1])
@@ -103,32 +83,17 @@ def training_step(H, data_input, target, vae, ema_vae, optimizer, iterate):
 
 def eval_step(data_input, target, ema_vae):
     with torch.no_grad():
-        # x, x_oracle_target = data_input.chunk(2, dim=1)  # (B,4,H,W)
+        # x:               Partial [-1,1]
+        # x_oracle:        Completed [-1,1]
+        # x_oracle_target: Completed [-1,1]
         x = data_input[:, 0:5]  # (-1,1)
         x_oracle_target = data_input[:, 5:10]  # (-1,1)
-
-        # x[:, 1:2] = 2 * x[:, 1:2] - 1
-
-        # x_oracle: Completed road [-1,1]
-        # x_oracle_target = 2 * x_oracle_target - 1
         x_oracle = x_oracle_target.clone()
-        # x_oracle[:, 0:1] = 2 * x_oracle[:, 0:1] - 1
-        # x_oracle = 2 * x_oracle - 1
 
-        # Make non-road intensity 0
-        # m_oracle = ~(x_oracle[:, 0:1] == -1)
-        # x_oracle_int = x_oracle[:, 1:2]
-        # x_oracle_int[~m_oracle] = 0.
-        # x_oracle[:, 1:2] = x_oracle_int
-
-        # m_in_road = (x[:, 0:1] > 0.25)
-        # x_int = x[:, 1:2]
-        # x_int[~m_in_road] = 0.
-        # x[:, 1:2] = x_int
-
+        # Renaming for paper nomenclature
         x_post_match = x
-        x_oracle = x_oracle
 
+        # Dummy fully observed completed mask
         m_target = torch.ones_like(x_oracle_target[:, 0:1])
 
         # Add input observability mask
@@ -140,10 +105,12 @@ def eval_step(data_input, target, ema_vae):
         x_oracle_target = torch.permute(x_oracle_target, (0, 2, 3, 1))
         m_target = torch.permute(m_target, (0, 2, 3, 1))
 
+        # x_oracle:        (2B,H,W,5) (-1,1) <-- Duplicates of B samples
+        # x_post_match:    (2B,H,W,6) (-1,1)
+        # x_oracle_target: (2B,H,W,5) (-1,1)
+        # m_target:        (2B,H,W,1)
         stats = ema_vae.forward(x_oracle, x_post_match, x_oracle_target,
                                 m_target)
-
-        # x_hat = ema_vae.inference(x_post_match)
 
     stats = get_cpu_stats_over_ranks(stats)
     return stats
@@ -189,6 +156,7 @@ def train_loop(H, data_train, data_valid, preprocess_fn, vae, ema_vae,
     viz_batch_original, viz_batch_original_oracle, viz_batch_processed, viz_batch_processed_oracle = get_sample_for_visualization(
         data_valid, preprocess_fn, H.num_images_visualize, H.dataset)
 
+    # Skip early evaluations to save time
     early_evals = set([9999999])  # set([1] + [2**exp for exp in range(3, 14)])
     stats = []
     iters_since_starting = 0
@@ -401,9 +369,6 @@ def run_test_eval(H, ema_vae, data_test, preprocess_fn, logprint):
     print('evaluating')
     viz_batch_original, viz_batch_original_oracle, viz_batch_processed, viz_batch_processed_oracle = get_sample_for_visualization(
         data_test, preprocess_fn, H.num_images_visualize, H.dataset)
-
-    # m_in = ~(viz_batch_processed == 0)
-    # viz_batch_processed_w_mask = torch.cat((viz_batch_processed, m_in), dim=-1)
 
     m_in = ~(viz_batch_processed[:, :, :, 0:1] == 0)
     viz_batch_processed_w_mask = torch.cat((viz_batch_processed, m_in), dim=-1)

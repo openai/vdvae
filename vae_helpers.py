@@ -343,23 +343,6 @@ def discretized_mix_logistic_loss(x, l, mask, low_bit=False):
         x.device)  # Expand last dim to each mixture distr?
     means = conditional_distr_train_5ch(means, coeffs, x)
 
-    # ms = []
-    # m_1 = torch.reshape(means[:, :, :, 0, :], [xs[0], xs[1], xs[2], 1, nr_mix])
-    # ms.append(m_1)
-    # for idx in range(1, means.shape[3]):
-    #     m_idx = torch.reshape(
-    #         means[:, :, :, idx, :] +
-    #         coeffs[:, :, :, idx - 1, :] * x[:, :, :, 0, :],
-    #         [xs[0], xs[1], xs[2], 1, nr_mix])
-    #     ms.append(m_idx)
-    # m2 = torch.reshape(
-    #     means[:, :, :, 1, :] + coeffs[:, :, :, 0, :] * x[:, :, :, 0, :],
-    #     [xs[0], xs[1], xs[2], 1, nr_mix])
-    # m3 = torch.reshape(
-    #     means[:, :, :, 2, :] + coeffs[:, :, :, 1, :] * x[:, :, :, 0, :] +
-    #     coeffs[:, :, :, 2, :] * x[:, :, :, 1, :],
-    #     [xs[0], xs[1], xs[2], 1, nr_mix])
-    # means = torch.cat(ms, dim=3)
     centered_x = x - means
     inv_stdv = torch.exp(-log_scales)
     if low_bit:
@@ -445,63 +428,6 @@ def sample_from_discretized_mix_logistic(l, nr_mix, ch=3):
 
     x_out = conditional_distr_inference_5ch(x, coeffs)
 
-    #    # New
-    #    if ch == 1:
-    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-    #        x_out = torch.reshape(x0, xs[:-1] + [1])
-    #    if ch == 2:
-    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-    #        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
-    #                       1.)
-    #        x_out = torch.cat([
-    #            torch.reshape(x0, xs[:-1] + [1]),
-    #            torch.reshape(x1, xs[:-1] + [1])
-    #        ],
-    #                          dim=3)
-    #    elif ch == 5:
-    #        # Condition all other outputs on 'road' (i.e. pred structure) output
-    #        # Road
-    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-    #        # Intensity
-    #        # x1 = const_min(const_max(x[:, :, :, 1], -1.), 1.)
-    #        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
-    #                       1.)
-    #        # RGB
-    #        x2 = const_min(const_max(x[:, :, :, 2], -1.), 1.)
-    #        # x2 = const_min(const_max(x[:, :, :, 2] + coeffs[:, :, :, 0] * x0, -1.),
-    #        #                1.)
-    #        x3 = const_min(const_max(x[:, :, :, 3], -1.), 1.)
-    #        # x3 = const_min(const_max(x[:, :, :, 3] + coeffs[:, :, :, 0] * x0, -1.),
-    #        #                1.)
-    #        x4 = const_min(const_max(x[:, :, :, 4], -1.), 1.)
-    #        # x4 = const_min(const_max(x[:, :, :, 4] + coeffs[:, :, :, 0] * x0, -1.),
-    #        #                1.)
-    #        x_out = torch.cat([
-    #            torch.reshape(x0, xs[:-1] + [1]),
-    #            torch.reshape(x1, xs[:-1] + [1]),
-    #            torch.reshape(x2, xs[:-1] + [1]),
-    #            torch.reshape(x3, xs[:-1] + [1]),
-    #            torch.reshape(x4, xs[:-1] + [1]),
-    #        ],
-    #                          dim=3)
-    #    # Old
-    #    elif ch == 3:
-    #        x0 = const_min(const_max(x[:, :, :, 0], -1.), 1.)
-    #        x1 = const_min(const_max(x[:, :, :, 1] + coeffs[:, :, :, 0] * x0, -1.),
-    #                       1.)
-    #        x2 = const_min(
-    #            const_max(
-    #                x[:, :, :, 2] + coeffs[:, :, :, 1] * x0 +
-    #                coeffs[:, :, :, 2] * x1, -1.), 1.)
-    #        x_out = torch.cat([
-    #            torch.reshape(x0, xs[:-1] + [1]),
-    #            torch.reshape(x1, xs[:-1] + [1]),
-    #            torch.reshape(x2, xs[:-1] + [1])
-    #        ],
-    #                          dim=3)
-    #    else:
-    #        raise NotImplementedError()
-
     return x_out
 
 
@@ -531,26 +457,6 @@ class DmolNet(nn.Module):
             padding=0)
 
     def nll(self, px_z, x, mask):
-        # x_hat = self.forward(px_z)
-
-        # x_hat_road = x_hat[:, :, :, 0:1]
-        # x_hat_int = x_hat[:, :, :, 1:2]
-        # x_road = x[:, :, :, 0:1]
-        # x_int = x[:, :, :, 1:2]
-
-        # if self.rec_objective == 'ce':
-        #     recon_road = -1. * binary_cross_entropy(x_hat_road, x_road, mask)
-        #     recon_int = -1. * binary_cross_entropy(x_hat_int, x_int, mask)
-        # elif self.rec_objective == 'mse':
-        #     recon_road = mse(x_hat_road, x_road, mask)
-        #     recon_int = mse(x_hat_int, x_int, mask)
-        # else:
-        #     raise Exception(
-        #         f'Undefined reconstruction objective ({self.rec_objective})')
-
-        # recon_loss = recon_road + recon_int
-
-        # return recon_loss
         return discretized_mix_logistic_loss(x=x,
                                              l=self.forward(px_z),
                                              mask=mask[:, :, :, 0],
@@ -566,8 +472,6 @@ class DmolNet(nn.Module):
         im = sample_from_discretized_mix_logistic(self.forward(px_z),
                                                   self.H.num_mixtures, self.ch)
         x_hat = (im + 1.0) * 127.5
-        # x_hat = self.forward(px_z)
-        # x_hat = x_hat * 255.
         x_hat = x_hat.detach().cpu().numpy()
         x_hat = np.minimum(np.maximum(0.0, x_hat), 255.0).astype(np.uint8)
         return x_hat
